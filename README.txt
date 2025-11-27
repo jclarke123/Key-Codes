@@ -4,3 +4,4 @@ This is a public showcase of the key codes used in Clarke et al. (2024) and Clar
 * make power and cross-spectra
 * making and applying masks
 Which form key parts of this science
+Taking catalogue data from e.g. COSMOS2020 data could be processed through this pipeline
