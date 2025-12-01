@@ -4,6 +4,11 @@ This is a public showcase of the key codes used in Clarke et al. (2024) and Clar
 * make power and cross-spectra
 * making and applying masks
 Which form key parts of this science
+
+The files are ordered to tell the story of how we manipulate files
+Some parts have been redacted (e.g. those relating to specific file locations)
+Some simpler parts of the procedure, e.g. developing models, are also not included.
+
 Taking catalogue data from e.g. COSMOS2020 data could be processed through this pipeline. This data is sourced from https://cosmos2020.calet.org/ (Weaver et al. 2022). CANDELS data. We also calibrate using CANDELS data from https://archive.stsci.edu/hlsp/candels (Nayyeri et al. 2017)
 
 
