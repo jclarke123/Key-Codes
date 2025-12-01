@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 This code involves loading in the existing flux maps to be used in creating power spectra
 A 2D or 3D power spectrum can be made from this. the 2D verson is 'converted' to 3D by dividing through by the comoving distance between the ends of the redshift bin
@@ -17,44 +15,98 @@ from scipy.integrate import quad
 import scipy.ndimage as nd
 import astropy.units as u
 
-###Loads in the file, and unpacks the metadata from the flux map. This is all passed into the files
-def loadFile(Loadname):
-    arr=np.load(Loadname,allow_pickle='True')
-    OtherProp,RedshiftProp,FluxMap=arr[0],arr[1],arr[2]
-    return OtherProp,RedshiftProp,FluxMap
 
-#we need to remove nans from our final values - do for both arrays!
-def removeNans(k,PS):
-    nk,nPS=[],[]
-    for i in range(len(PS)):
-        if not np.isnan(PS[i]):
-            nk.append(k[i])
-            nPS.append(PS[i])
-    return nk,nPS
 
-#the exponential function we integrate for the errors
+
+
 def expf(x,k,kparmax,sigmaperp,sigmapar):
+    """
+    the exponential function we integrate for the error calculation (from Chung+2019). Also see Karoumpis+2021, Clarke+2024 appendices for the full consstruction
+
+    Parameters
+    ----------
+    x : float
+        we integrate between 0 and 1 for this
+    k : float
+        spatial frequency value of the k bin we are doing this integration for
+    kparmax : float
+        maxmum spatial frequency value
+    sigmaperp/par : float
+        uncertainity from sensitivity in perpendicular and parallel directions
+
+    Returns
+    -------
+    float
+        the result of the integral
+
+    """
     return np.exp((sigmaperp**2-sigmapar**2)*(np.min([kparmax,x*k]))**2)
 
-#This function is required to get in the form (x,y,z), instead of (z,x,y) which FluxMapCreation leaves us in, for a 3D map! If you don't need this, either remove from below,
-#or apply this function beforehand, as create3DPowerSpectrum does it anyway!
-def TrueReshape(FluxMap):
 
-    NewFluxMap=np.flip(np.rot90(FluxMap,axes=(2,0)),axis=2)
-    return NewFluxMap
-#TODO
-#Most of the 3D power spectrum code is very similar to the 2D code, however there are notable differences, such as the 3D k map creation, and the k maximum having another candidate
-#One key difference, is that a) the "map" portion MUST be a square for 3D, and b) it must be in the format (z,x,y), as done in FluxMapCreation
+def CubeReshape(FluxCube):
+    """
+    We make cubes in (z,x,y) format. However, making power spectra is far easier in the (x,y,z) format. This function rotates the 3D cube appropriately
+
+    Parameters
+    ----------
+    FluxCube : numpy array
+        The 3D cube we aim to rotate
+
+    Returns
+    -------
+    NewFluxCube : numpy array
+        The resulting cube
+
+    """
+    NewFluxCube=np.flip(np.rot90(FluxCube,axes=(2,0)),axis=2)
+    return NewFluxCube
 
 def create3DPowerSpectrum(cosmo,kValParameter,FluxCube,MeanRedshift,StartingRedshift,EndingRedshift,PixelLengthMpc,PixelLengthArcsec,IndivLineFreq,
-                          MapSpreadParameter,FreqSpreadParameter,VolumeFactor=1): #volumefactor is used if some pixels masked, need to be removed
+                          MapSpreadParameter,FreqSpreadParameter,VolumeFactor=1):
+    """
+    
+
+    Parameters
+    ----------
+    cosmo : astropy cosmology object
+        The cosmology we use for determining e.g. luminositiy distances
+    kValParameter : list
+        First part determines the type of k bins we are using. Any subsequent parts of list determine e.g. boundaries, depending on the type used
+    FluxCube : numpy array
+        The tomography we are taking the power spectra of 
+    Mean/Starting/EndingRedshift : floats
+        The redshift range covered by the cube, for the rest frequency of the line we are calibrating for
+    PixelLengthMpc : float
+        Length of a given pixel in space, in Mpc
+    PixelLengthArcsec : float
+        Length of a given pixel in space, in arcsec
+    IndivLineFreq : float
+        The rest frequency of the line we are calibrating for - we need for sensitivity calculations
+    Map/FreqSpreadParameter : float
+        If we wish to convolve with a beam, we should subgrid the voxels. These are the corresponding parameters for each direction.
+    VolumeFactor : float, optional
+        Key in calibrating the PS via volume normalisation, Must be between 0 and 1 (for masking all vs masking no volume)
+
+    Returns
+    -------
+    k : numpy array
+        array of spatial frequency bins we are calculating the power spectra for 
+    PS : numpy array
+        array of those values, using the k³P(k)/2pi² normalisation
+    PnDEFAULT : numpy array
+        array of noise sensitivity for those values, see Chung+2020
+    nummodesDEFAULT : numpy array
+        Values used in above
+    WDEFAULT : numpy array
+        Values used in above
+
+    """
     print("VolFactor: "+str(VolumeFactor))
     #a lot is similar to above, but we do make some adjustments
     #we now have a z direction! This tells us about how many slices we have
     
     #note that the format we get the map is the wrong way around (we want x,y,z; not z,x,y)! We need to reshape to get the axes in order
     
-    print(np.shape(FluxCube))
     VoxelXNum,VoxelYNum,VoxelZNum=len(FluxCube),len(FluxCube[0]),len(FluxCube[0][0]) 
     ComovingZLength=cosmo.comoving_distance(EndingRedshift).value-cosmo.comoving_distance(StartingRedshift).value
     ComovingMapLength=max([VoxelXNum,VoxelYNum])*PixelLengthMpc
@@ -118,10 +170,6 @@ def create3DPowerSpectrum(cosmo,kValParameter,FluxCube,MeanRedshift,StartingReds
     dK=-bin_edges[:-1]+bin_edges[1:]
     k=bin_edges[1:]-(dK/2.)
 
-
-    k,PS=removeNans(k,PS)
-    k=np.asarray(k)
-
     ##########these errors
     StartingFrequency=IndivLineFreq/(1+EndingRedshift)
     if    StartingFrequency<400 and StartingFrequency>380: PnFactor=((2.2e4)**2)  #similar, to turn to volume to beam
@@ -154,7 +202,47 @@ def create3DPowerSpectrum(cosmo,kValParameter,FluxCube,MeanRedshift,StartingReds
 
 def create3DCrossSpectrum(cosmo,kValParameter,FluxCube1,MeanRedshift1,StartingRedshift1,EndingRedshift1,PixelLengthMpc1,
                           FluxCube2,MeanRedshift2,StartingRedshift2,EndingRedshift2,PixelLengthMpc2,VolUsed="Average",ZoomDim=(20,200,200),
-                          MSP=3,FSP=3): 
+                          MapSpreadParameter=3,FreqSpreadParameter=3): 
+    """
+    
+
+    Parameters
+    ----------
+    cosmo : astropy cosmology object
+        The cosmology we use for determining e.g. luminositiy distances
+    kValParameter : list
+        First part determines the type of k bins we are using. Any subsequent parts of list determine e.g. boundaries, depending on the type used
+    For the two tomographies:
+    FluxCube : numpy array
+        The tomography we are taking the power spectra of 
+    Mean/Starting/EndingRedshift : floats
+        The redshift range covered by the cube, for the rest frequency of the line we are calibrating for
+    PixelLengthMpc : float
+        Length of a given pixel in space, in Mpc
+    PixelLengthArcsec : float
+        Length of a given pixel in space, in arcsec
+    IndivLineFreq : float
+        The rest frequency of the line we are calibrating for - we need for sensitivity calculations
+
+    
+    Others
+    VolUsed : string, optional
+        Cubes will cover extremely similar, but not identical volumes - this parameter determines which we use. The default is "Average".
+    ZoomDim : list, optional
+        the 3D array we interpolate the cubes into, in order for the cross-correlation to successfully function. The default is (20,200,200).
+    Map/FreqSpreadParameter : float, optional
+        If we wish to convolve with a beam, we should subgrid the voxels. These are the corresponding parameters for each direction.
+
+    Currently no volume masking normalisation has been implemented
+
+    Returns
+    -------
+    k : numpy array
+        array of spatial frequency bins we are calculating the power spectra for 
+    CCPS : numpy array
+        array of those values, using the k³P(k)/2pi² normalisation
+
+    """
     #we do the first step seperately for both cubes
     ##FluxCube1=   RescaleArrayGauss(FluxCube1) #WE NEED TO RESCALE TO STANDARD 20x200x200 now
     PixelLengthMpc1=PixelLengthMpc1/(ZoomDim[1]/len(FluxCube1[0]))
@@ -162,7 +250,7 @@ def create3DCrossSpectrum(cosmo,kValParameter,FluxCube1,MeanRedshift1,StartingRe
     FluxCube1=nd.zoom(FluxCube1,(ZoomDim[0]/len(FluxCube1),ZoomDim[1]/len(FluxCube1[0]),ZoomDim[2]/len(FluxCube1[0][0])))
     #print(np.sum(FluxCube1),np.shape(FluxCube1))
     VoxelXNum1,VoxelYNum1,VoxelZNum1=len(FluxCube1[0][0]),len(FluxCube1[0]),len(FluxCube1) 
-    FluxCube1=TrueReshape(FluxCube1) 
+    FluxCube1=CubeReshape(FluxCube1) 
     
     
     ComovingZLength1=cosmo.comoving_distance(EndingRedshift1).value-cosmo.comoving_distance(StartingRedshift1).value
@@ -177,7 +265,7 @@ def create3DCrossSpectrum(cosmo,kValParameter,FluxCube1,MeanRedshift1,StartingRe
     FluxCube2=nd.zoom(FluxCube2,(ZoomDim[0]/len(FluxCube2),ZoomDim[1]/len(FluxCube2[0]),ZoomDim[2]/len(FluxCube2[0][0])))
     #print(np.sum(FluxCube2),np.shape(FluxCube2))
     VoxelXNum2,VoxelYNum2,VoxelZNum2=len(FluxCube2[0][0]),len(FluxCube2[0]),len(FluxCube2) 
-    FluxCube2=TrueReshape(FluxCube2) 
+    FluxCube2=CubeReshape(FluxCube2) 
     
     ComovingZLength2=cosmo.comoving_distance(EndingRedshift2).value-cosmo.comoving_distance(StartingRedshift2).value
     ComovingMapLength2=max([VoxelXNum2,VoxelYNum2])*PixelLengthMpc2
@@ -231,8 +319,8 @@ def create3DCrossSpectrum(cosmo,kValParameter,FluxCube1,MeanRedshift1,StartingRe
     
     ####the average for these values, need to redo
     kcross=4*np.pi/  ((ComovingMapLength1+ComovingMapLength2)**2+(ComovingZLength1+ComovingZLength2)**2)**0.5    
-    kparmax=2*np.pi/  ((ComovingZLength1+ComovingZLength2)/VoxelZNumUsed)/FSP
-    kperpmax=2*np.pi/   (PixelLengthMpc1+PixelLengthMpc2)/MSP
+    kparmax=2*np.pi/  ((ComovingZLength1+ComovingZLength2)/VoxelZNumUsed)/FreqSpreadParameter
+    kperpmax=2*np.pi/   (PixelLengthMpc1+PixelLengthMpc2)/MapSpreadParameter
     
     #when using spacing, we add two more options. The "three bins" option gives bins the size of 0.3 (name is weird). 10x typical defaults, use as wide bin examples
     if kValParameter[0]=='Linspace':
@@ -250,9 +338,6 @@ def create3DCrossSpectrum(cosmo,kValParameter,FluxCube1,MeanRedshift1,StartingRe
     CCPS,bin_edges,binnumber=stats.binned_statistic(NormkProfile,(NormkProfile**3)*NormFTProfile/(2*((np.pi)**2)), statistic='mean', bins=kbins)
     dK=-bin_edges[:-1]+bin_edges[1:]
     k=bin_edges[1:]-(dK/2.)
-    k,CCPS=removeNans(k,CCPS)
-    k=np.asarray(k)
-    CCPS=np.asarray(CCPS)
     return k, CCPS
 
 
@@ -276,21 +361,43 @@ def create3DCrossSpectrum(cosmo,kValParameter,FluxCube1,MeanRedshift1,StartingRe
 #accounting for any spread of course
 #Also have "AutoCII" - that is, using the scales of CII (that is, the redshifts) - in cases where we want to stay to a fixed volume scale. Normally false, may need to use when stacking stuff, etc
 def runPSC(cosmo,Mapname,PSname,kValParameters,AutoCII=True,VolumeFactor=1,MapSpreadParameter=1,FreqSpreadParameter=1): 
-    #The introduction bit is a bit off. Basically, to maintain compatability with previous work, we need to have a whole bunch of different options - e.g. do we use default redshiftprop, or import one in?
-    #print(Mapname)
+    """
+    Running the above from a cube from FluxMapCreation    
+
+    Parameters
+    ----------
+
+    cosmo : astropy cosmology object
+        The cosmology we use for determining e.g. luminositiy distances
+    Mapname : string
+        File location of the map we make spectra of
+    PSname : string
+        File location of the spectra we make save to
+    kValParameter : list
+        First part determines the type of k bins we are using. Any subsequent parts of list determine e.g. boundaries, depending on the type used
+    AutoCII : boolean, optional
+        Deciding whether we are using the values in the cube file. The default is True.
+    Map/FreqSpreadParameter : float
+        If we wish to convolve with a beam, we should subgrid the voxels. These are the corresponding parameters for each direction.
+    VolumeFactor : float, optional
+        Key in calibrating the PS via volume normalisation, Must be between 0 and 1 (for masking all vs masking no volume)
+
+
+    Returns
+    -------
+    None.
+
+    """
     Mapdata=np.load(Mapname,allow_pickle=True)
-    #some old files didn't have signal tracer - for those without, how do we ensure we have signal
-    #print(Mapdata.files)
-    FluxMap, StartingRedshift, EndingRedshift=Mapdata['FluxMap'],Mapdata['StartingRedshift'],Mapdata['EndingRedshift']
+ 
+    FluxCube, StartingRedshift, EndingRedshift=Mapdata['FluxMap'],Mapdata['StartingRedshift'],Mapdata['EndingRedshift']
     RestFrequency=Mapdata['RestFrequency']
-    print(np.shape(FluxMap))
     
     
-    #by default, we normalise all power spectra by the volume covered by [CII]
     if AutoCII:
         print("AUTOCII")
         
-        #we update the parameters to fit COSMOS
+        #we update the parameters to fit as if we are assuming we are observing [CII] signal
         StartingRedshift=(1900.537*(1+StartingRedshift)/RestFrequency)-1
         EndingRedshift=(1900.537*(1+EndingRedshift)/RestFrequency)-1
         RestFrequency=1900.537 
@@ -304,7 +411,7 @@ def runPSC(cosmo,Mapname,PSname,kValParameters,AutoCII=True,VolumeFactor=1,MapSp
     
     PixelLengthArcsec=BeamSizeArcsec/MapSpreadParameter #length of pixels in arcseconds
     PixelLengthMpc=PixelLengthArcsec*dA
-    k,k3Pk,PnDEFAULT,nummodesDEFAULT,WDEFAULT=create3DPowerSpectrum(cosmo,kValParameters,FluxMap,MeanRedshift,StartingRedshift,EndingRedshift,PixelLengthMpc,PixelLengthArcsec,RestFrequency,MapSpreadParameter,FreqSpreadParameter,VolumeFactor)
+    k,k3Pk,PnDEFAULT,nummodesDEFAULT,WDEFAULT=create3DPowerSpectrum(cosmo,kValParameters,FluxCube,MeanRedshift,StartingRedshift,EndingRedshift,PixelLengthMpc,PixelLengthArcsec,RestFrequency,MapSpreadParameter,FreqSpreadParameter,VolumeFactor)
 
     np.savez(PSname,k=k,kCubedPk=k3Pk,nummodesDEFAULT=nummodesDEFAULT,PnDEFAULT=PnDEFAULT,WDEFAULT=WDEFAULT)
 
@@ -313,42 +420,79 @@ def runPSC(cosmo,Mapname,PSname,kValParameters,AutoCII=True,VolumeFactor=1,MapSp
  
 
 #TODO
-def runCCPSC(cosmo,Filename1,Filename2,CCPSname,kValParameters,StartFreq1,StartFreq2,RestFreq1,RestFreq2,Slices1,Slices2):
+def runCCPSC(cosmo,Mapname1,Mapname2,CCPSname,kValParameters,StartFrequency1,StartFrequency2,RestFrequency1,RestFrequency2,Slices1,Slices2):
+    """
+    Making the cross-spectra. This function is less developed, with no masking parameter implemented yet    
+    Note: as the cubes must cover the same volume, these MUST be explicit with the different lines/rest frequencies
+    We take a few slices from each cube, to cross-correlate over specific sections
+    Parameters
+    ----------
+    cosmo : astropy cosmology object
+        The cosmology we use for determining e.g. luminositiy distances
+        
+    For each of the two cubes:
+    Mapname : string
+        File location of the map we make spectra of
+    
+    StartFreq : float
+        Starting frequency of the cubes you use. Note - this is NOT the start frequency of the section we CC, which we must calcuate
 
-    FluxMap1=np.load(Filename1)["FluxMap"]
-    FluxMap2=np.load(Filename2)["FluxMap"]
+    RestFreq : float
+        Rest frequency of the given line (NOT NORMALISING TO CII BY DEFAULT)
+
+    Slices : list
+        Two values, representing the sections of the base cube we then cut out
+
+        
+    And then:
+    CCPSname : string
+        File location of the spectra we make save to
+    kValParameters : list
+        First part determines the type of k bins we are using. Any subsequent parts of list determine e.g. boundaries, depending on the type used
+
+    Returns
+    -------
+    None.
+
+    """
+    
+    
+    
+    
+    FluxCube1=np.load(Mapname1)["FluxMap"]
+    FluxCube2=np.load(Mapname2)["FluxMap"]
 
 
-    Dep1=len(FluxMap1)
-    Dep2=len(FluxMap2)
-    Len1=len(FluxMap1[0])
-    Len2=len(FluxMap2[0])
+    Dep1=len(FluxCube1)
+    Dep2=len(FluxCube2)
+    Len1=len(FluxCube1[0])
+    Len2=len(FluxCube2[0])
 
-    if StartFreq1==390:
+    if StartFrequency1==390:
         FreqInt1=28/Dep1
     else:
         FreqInt1=40/Dep1
-    if StartFreq2==390:
+    if StartFrequency2==390:
         FreqInt2=28/Dep2
     else:
         FreqInt2=40/Dep2
 
-    ActualStartFreq1=StartFreq1+FreqInt1*Slices1[0]
-    ActualEndFreq1=StartFreq1+FreqInt1*Slices1[1]
+    ActualStartFrequency1=StartFrequency1+FreqInt1*Slices1[0]
+    ActualEndFrequency1=StartFrequency1+FreqInt1*Slices1[1]
 
-    ActualStartFreq2=StartFreq2+FreqInt2*Slices2[0]
-    ActualEndFreq2=StartFreq2+FreqInt2*Slices2[1]
+    ActualStartFrequency2=StartFrequency2+FreqInt2*Slices2[0]
+    ActualEndFrequency2=StartFrequency2+FreqInt2*Slices2[1]
 
 
-    StartingRedshift1=(RestFreq1/ActualEndFreq1)-1 
-    EndingRedshift1=(RestFreq1/ActualStartFreq1)-1 
+    StartingRedshift1=(RestFrequency1/ActualEndFrequency1)-1 
+    EndingRedshift1=(RestFrequency1/ActualStartFrequency1)-1 
     MeanRedshift1=(StartingRedshift1+EndingRedshift1)/2
     dA=cosmo.kpc_comoving_per_arcmin(MeanRedshift1).value*60/1000 #Mpc/deg
     ComovingMapLength1=1.2*dA
     PixelLengthMpc1=ComovingMapLength1/Len1
 
-    StartingRedshift2=(RestFreq2/ActualEndFreq2)-1 
-    EndingRedshift2=(RestFreq2/ActualStartFreq2)-1 
+    StartingRedshift2=(RestFrequency2/ActualEndFrequency2)-1 
+    EndingRedshift2=(RestFrequency2/ActualStartFrequency2)-1 
     MeanRedshift2=(StartingRedshift2+EndingRedshift2)/2
     dA=cosmo.kpc_comoving_per_arcmin(MeanRedshift2).value*60/1000 #Mpc/deg
     ComovingMapLength2=1.2*dA
@@ -357,8 +501,8 @@ def runCCPSC(cosmo,Filename1,Filename2,CCPSname,kValParameters,StartFreq1,StartF
 
     NewMapDepth=np.max([Slices1[1]+1-Slices1[0],Slices2[1]+1-Slices2[0]])
     NewMapLength=np.max([Len1,Len2])
-    k,Pk=create3DCrossSpectrum(cosmo,kValParameters,FluxMap1[Slices1[0]:Slices1[1]+1],MeanRedshift1,StartingRedshift1,EndingRedshift1,PixelLengthMpc1,
-                              FluxMap2[Slices2[0]:Slices2[1]+1],MeanRedshift2,StartingRedshift2,EndingRedshift2,PixelLengthMpc2,VolUsed="Average",
+    k,Pk=create3DCrossSpectrum(cosmo,kValParameters,FluxCube1[Slices1[0]:Slices1[1]+1],MeanRedshift1,StartingRedshift1,EndingRedshift1,PixelLengthMpc1,
+                              FluxCube2[Slices2[0]:Slices2[1]+1],MeanRedshift2,StartingRedshift2,EndingRedshift2,PixelLengthMpc2,VolUsed="Average",
                               ZoomDim=(NewMapDepth,NewMapLength,NewMapLength))
     np.savez(CCPSname,k=k,kCubedPk=Pk)
                         
