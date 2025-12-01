@@ -1,25 +1,19 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-A hybrid of the Karoumpis and VC methods
-"""
-
 import numpy as np
 import astropy.units as u
 from tqdm import tqdm
-import FluxMapCreation as FMC
 from astropy.cosmology import FlatLambdaCDM
-import MakingMapsPSAndCS as MMPC
 from astropy.convolution import convolve
 import os
 import PSAndCC_Creation as PSC
+import CANDELSextrapolation as CE
+import FluxMapCreation as FMC
 
 cosmo= FlatLambdaCDM(H0=70 * u.km / u.s / u.Mpc, Tcmb0=2.73 * u.K, Om0=0.3)
 
 
     
     
-def makeGaussxBinMasksCOSMOS(cosmo,Samplefilenames,RestFrequency,ObsFrequency,sigma=1,miniarrlen=7,MainSequence="" ,FirstMaskname="",SecondMaskname="",MapSpreadParameter=3,FreqSpreadParameter=3,OriginalMapParams=[45000,29000,29000,7000,36000,7600,36600],NameParams="",CompleteType="",ActualBeamSize=True):
+def makeGaussxBinMasksCOSMOS(cosmo,Samplefilenames,RestFrequency,StartFrequency,EndFrequency,PixelScalingFactor,SliceNumber,sigma=1,miniarrlen=7,MainSequence="" ,FirstMaskname="",SecondMaskname="",MapSpreadParameter=3,FreqSpreadParameter=3,OriginalMapParams=[45000,29000,29000,7000,36000,7600,36600],NameParams="",CompleteType="",ActualBeamSize=True):
     """
     
 
@@ -31,7 +25,9 @@ def makeGaussxBinMasksCOSMOS(cosmo,Samplefilenames,RestFrequency,ObsFrequency,si
         DESCRIPTION.
     RestFrequency : TYPE
         DESCRIPTION.
-    ObsFrequency : TYPE
+    StartFrequency : TYPE
+        DESCRIPTION.
+    EndFrequency : TYPE
         DESCRIPTION.
     sigma : TYPE, optional
         DESCRIPTION. The default is 1.
@@ -61,36 +57,9 @@ def makeGaussxBinMasksCOSMOS(cosmo,Samplefilenames,RestFrequency,ObsFrequency,si
     None.
 
     """
-    if ObsFrequency==390: 
-        PixelScalingFactor=33/0.15
-        SliceNumber=7 #this for no spread in 3rd dimension
-        StartingRedshift=(RestFrequency/(ObsFrequency+28))-1
-        EndingRedshift=(RestFrequency/ObsFrequency)-1
-    elif ObsFrequency==330:  #NOTE: IF DOING FOR A CC MAP, Need to do 200/111.5 instead of 200/111.5. Else, get screwed by rounding
-        PixelScalingFactor=round(37/0.15)
-        SliceNumber=11
-        StartingRedshift=(RestFrequency/(ObsFrequency+40))-1
-        EndingRedshift=(RestFrequency/ObsFrequency)-1
-    elif ObsFrequency==260: 
-        PixelScalingFactor=48/0.15
-        SliceNumber=14
-        StartingRedshift=(RestFrequency/(ObsFrequency+40))-1
-        EndingRedshift=(RestFrequency/ObsFrequency)-1
-    elif ObsFrequency==205:  
-        PixelScalingFactor=round(58/0.15)
-        SliceNumber=18   
-        StartingRedshift=(RestFrequency/(ObsFrequency+40))-1
-        EndingRedshift=(RestFrequency/ObsFrequency)-1
-    elif ObsFrequency==130:
-        PixelScalingFactor=460
-        SliceNumber=27
-        StartingRedshift=(RestFrequency/(ObsFrequency+40))-1
-        EndingRedshift=(RestFrequency/ObsFrequency)-1
-    elif ObsFrequency==70: #Including the extra stuff  from roy+bat +24
-        PixelScalingFactor=520
-        SliceNumber=44
-        StartingRedshift=(RestFrequency/(ObsFrequency+40))-1
-        EndingRedshift=(RestFrequency/ObsFrequency)-1
+    
+    StartingRedshift=(RestFrequency/EndFrequency)-1
+    EndingRedshift=(RestFrequency/StartFrequency)-1
     MapLength=int(round(OriginalMapParams[1]/PixelScalingFactor))
     TrueMapLength=MapLength*MapSpreadParameter
     TrueMapDepth=SliceNumber*FreqSpreadParameter
@@ -118,7 +87,7 @@ def makeGaussxBinMasksCOSMOS(cosmo,Samplefilenames,RestFrequency,ObsFrequency,si
     
     for iiii in range(len(Samplefilenames)):
         Samplefilename=Samplefilenames[iiii]
-        Data=FMC.loadSample(Samplefilename)
+        Data=CE.loadSample(Samplefilename)
         VariableList,_=FMC.fetchVariablesViaNamesCOSMOS(Data,StartingRedshift,EndingRedshift,OriginalMapParams,PixelScalingFactor,SliceNumber,RestFrequency,NameParams,MapSpreadParameter=MapSpreadParameter,FreqSpreadParameter=FreqSpreadParameter)
         xpix,ypix,zpix=VariableList["xpix"],VariableList["ypix"],VariableList["zpix"]
         log_mass=VariableList["log_mass"]
@@ -246,10 +215,34 @@ def makeGaussxBinMasksCOSMOS(cosmo,Samplefilenames,RestFrequency,ObsFrequency,si
 
 #TODO
 
+def fetchSamplefile(StartFrequency,EndFrequency,LineFreq,MaskType):
+    """
+    Not included for as includes details about internal file structure. In summary, this function calculates the redshift range of a given line, considering its rest and observed frequency.
+    It then fetches the appropriate catalogue file(s), taking into account whether it is a "Base", "Stellar Mask", "CANDELS extrapolated", or "Mass extrapolated".
+
+    Parameters
+    ----------
+    StartFrequency : TYPE
+        DESCRIPTION.
+    EndFrequency : TYPE
+        DESCRIPTION.
+    LineFreq : TYPE
+        DESCRIPTION.
+    MaskType : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    Files : TYPE
+        DESCRIPTION.
+
+    """
+    Files=""
+    
+    return Files
 
 
-
-def makingMasks(SavenameBase,SavenameMask,SavenameCANDELS,ObsFrequency,sigma,sigmalabel):
+def makingMasks(SavenameBase,SavenameMask,SavenameCANDELS,StartFrequency,sigma,MainSequence):
     """
     
 
@@ -261,13 +254,15 @@ def makingMasks(SavenameBase,SavenameMask,SavenameCANDELS,ObsFrequency,sigma,sig
         DESCRIPTION.
     SavenameCANDELS : TYPE
         DESCRIPTION.
-    ObsFrequency : TYPE
+    StartFrequency : TYPE
         DESCRIPTION.
     sigma : TYPE
         DESCRIPTION.
     sigmalabel : TYPE
         DESCRIPTION.
-
+    MainSequence : TYPE
+        DESCRIPTION.
+    
     Returns
     -------
     None.
@@ -275,106 +270,109 @@ def makingMasks(SavenameBase,SavenameMask,SavenameCANDELS,ObsFrequency,sigma,sig
     """
     NameParams={"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}
 
-    if ObsFrequency==205 or ObsFrequency==260:
-        COtransitions=[ "CO3_2","CO4_3","CO5_4",  "CO6_5","CO7_6",   "CO8_7","CO9_8"]
         
-        Transitions=[ 3, 4,5,6,7, 8,9]
-    elif ObsFrequency==330 or ObsFrequency==390:
+    sigmalabel=str(sigma).replace(".",",")
+ 
+    
+    if StartFrequency==390: 
         COtransitions=[ "CO4_3","CO5_4",  "CO6_5", "CO7_6",  "CO8_7","CO9_8"]
         
         Transitions=[ 4,5, 6, 7, 8,9]
-    
-        
-        
-    if ObsFrequency==390:
+        PixelScalingFactor=33/0.15
+        SliceNumber=7 #this for no spread in 3rd dimension
         FetchFreqMod=28
-    else:
-        FetchFreqMod=40
+    elif StartFrequency==330:  
+        COtransitions=[ "CO4_3","CO5_4",  "CO6_5", "CO7_6",  "CO8_7","CO9_8"]
         
+        Transitions=[ 4,5, 6, 7, 8,9]
+        PixelScalingFactor=round(37/0.15)
+        SliceNumber=11
+        FetchFreqMod=40
+    elif StartFrequency==260: 
+        COtransitions=[ "CO3_2","CO4_3","CO5_4",  "CO6_5","CO7_6",   "CO8_7","CO9_8"]
+        
+        Transitions=[ 3, 4,5,6,7, 8,9]
+        PixelScalingFactor=48/0.15
+        SliceNumber=14
+        FetchFreqMod=40
+    elif StartFrequency==205:  
+        COtransitions=[ "CO3_2","CO4_3","CO5_4",  "CO6_5","CO7_6",   "CO8_7","CO9_8"]
+        
+        Transitions=[ 3, 4,5,6,7, 8,9]
+        PixelScalingFactor=round(58/0.15)
+        SliceNumber=18   
+        FetchFreqMod=40
+    
+    
+    EndFrequency=StartFrequency+FetchFreqMod
+    
+    
+    
     COfreqs=115.27*np.asarray(Transitions)
 
     for i in range(len(COtransitions)):
-        FirstMaskname=SavenameBase+"VCGAUSSMASK_"+COtransitions[i]+"_"+str(ObsFrequency)+"GHz_COMPLETEMASK_BASE_sigma="+sigmalabel+".npy"
-        SecondMaskname=SavenameBase+"VCGAUSSMASK_"+COtransitions[i]+"_"+str(ObsFrequency)+"GHz_BRIGHTMASK_BASE_sigma="+sigmalabel+".npy"
-        Basesamplefilename=MMPC.fetchBasesamplefile_dz_05(ObsFrequency,ObsFrequency+FetchFreqMod,COfreqs[i],"Base",SimpleOrFirstEq="FirstEq")
-        if not(os.path.exists(FirstMaskname)) or not(os.path.exists(SecondMaskname)):
-            print("MAKING MASK")
-            print(FirstMaskname,SecondMaskname)
-            makeGaussxBinMasksCOSMOS(cosmo,Basesamplefilename,COfreqs[i],ObsFrequency,sigma=sigma,miniarrlen=7,MainSequence="" ,FirstMaskname=FirstMaskname,SecondMaskname=SecondMaskname,MapSpreadParameter=3,FreqSpreadParameter=3,OriginalMapParams=[45000,29000,29000,7000,36000,7600,36600],NameParams=NameParams,ActualBeamSize=True)
-        else:
-            print("notmaking")
-        FirstMaskname=SavenameMask+"VCGAUSSMASK_"+COtransitions[i]+"_"+str(ObsFrequency)+"GHz_COMPLETEMASK_MASK_sigma="+sigmalabel+".npy"
-        SecondMaskname=SavenameMask+"VCGAUSSMASK_"+COtransitions[i]+"_"+str(ObsFrequency)+"GHz_BRIGHTMASK_MASK_sigma="+sigmalabel+".npy"
-        Basesamplefilename=MMPC.fetchBasesamplefile_dz_05(ObsFrequency,ObsFrequency+FetchFreqMod,COfreqs[i],"Mask",SimpleOrFirstEq="FirstEq")
-        if not(os.path.exists(FirstMaskname)) or not(os.path.exists(SecondMaskname)):
-            print("MAKING MASK")
-            print(FirstMaskname,SecondMaskname)
-            makeGaussxBinMasksCOSMOS(cosmo,Basesamplefilename,COfreqs[i],ObsFrequency,sigma=sigma,miniarrlen=7,MainSequence="" ,FirstMaskname=FirstMaskname,SecondMaskname=SecondMaskname,MapSpreadParameter=3,FreqSpreadParameter=3,OriginalMapParams=[45000,29000,29000,7000,36000,7600,36600],NameParams=NameParams,ActualBeamSize=True)
-        else:
-            print("notmaking")
-        FirstMaskname=SavenameCANDELS+"VCGAUSSMASK_"+COtransitions[i]+"_"+str(ObsFrequency)+"GHz_COMPLETEMASK_CANDELS_sigma="+sigmalabel+".npy"
-        SecondMaskname=SavenameCANDELS+"VCGAUSSMASK_"+COtransitions[i]+"_"+str(ObsFrequency)+"GHz_BRIGHTMASK_CANDELS_sigma="+sigmalabel+".npy"
-        Basesamplefilename=MMPC.fetchBasesamplefile_dz_05(ObsFrequency,ObsFrequency+FetchFreqMod,COfreqs[i],"CANDELS",SimpleOrFirstEq="FirstEq")
-        if not(os.path.exists(FirstMaskname)) or not(os.path.exists(SecondMaskname)):
-            makeGaussxBinMasksCOSMOS(cosmo,Basesamplefilename,COfreqs[i],ObsFrequency,sigma=sigma,miniarrlen=7,MainSequence="Complex Multiline Samples/2 Masks, SLEDS and Voronoi Template/SLED/COSMOS2020MainSequence.npy" ,FirstMaskname=FirstMaskname,SecondMaskname=SecondMaskname,MapSpreadParameter=3,FreqSpreadParameter=3,OriginalMapParams=[45000,29000,29000,7000,36000,7600,36600],NameParams=NameParams,ActualBeamSize=True)
-        else:
-            print("notmaking")
+        FirstMaskname_Base=SavenameBase+"GAUSSMASK_"+COtransitions[i]+"_"+str(StartFrequency)+"GHz_COMPLETEMASK_BASE_sigma="+sigmalabel+".npy"
+        SecondMaskname_Base=SavenameBase+"GAUSSMASK_"+COtransitions[i]+"_"+str(StartFrequency)+"GHz_BRIGHTMASK_BASE_sigma="+sigmalabel+".npy"
+        Basesamplefilename=fetchSamplefile(StartFrequency,EndFrequency,COfreqs[i],"Base")
+        makeGaussxBinMasksCOSMOS(cosmo,Basesamplefilename,COfreqs[i],StartFrequency,EndFrequency,PixelScalingFactor,SliceNumber,sigma=sigma,miniarrlen=7,MainSequence=MainSequence ,FirstMaskname=FirstMaskname_Base,SecondMaskname=SecondMaskname_Base,MapSpreadParameter=3,FreqSpreadParameter=3,OriginalMapParams=[45000,29000,29000,7000,36000,7600,36600],NameParams=NameParams,ActualBeamSize=True)
+
+        FirstMaskname_SM=SavenameMask+"GAUSSMASK_"+COtransitions[i]+"_"+str(StartFrequency)+"GHz_COMPLETEMASK_STELLARMASK_sigma="+sigmalabel+".npy"
+        SecondMaskname_SM=SavenameMask+"GAUSSMASK_"+COtransitions[i]+"_"+str(StartFrequency)+"GHz_BRIGHTMASK_STELLARMASK_sigma="+sigmalabel+".npy"
+        Basesamplefilename=fetchSamplefile(StartFrequency,EndFrequency,COfreqs[i],"Mask")
+        makeGaussxBinMasksCOSMOS(cosmo,Basesamplefilename,COfreqs[i],StartFrequency,EndFrequency,sigma=sigma,miniarrlen=7,MainSequence=MainSequence ,FirstMaskname=FirstMaskname_SM,SecondMaskname=SecondMaskname_SM,MapSpreadParameter=3,FreqSpreadParameter=3,OriginalMapParams=[45000,29000,29000,7000,36000,7600,36600],NameParams=NameParams,ActualBeamSize=True)
+
+        FirstMaskname_CANDELS=SavenameCANDELS+"GAUSSMASK_"+COtransitions[i]+"_"+str(StartFrequency)+"GHz_COMPLETEMASK_CANDELS_sigma="+sigmalabel+".npy"
+        SecondMaskname_CANDELS=SavenameCANDELS+"GAUSSMASK_"+COtransitions[i]+"_"+str(StartFrequency)+"GHz_BRIGHTMASK_CANDELS_sigma="+sigmalabel+".npy"
+        Basesamplefilename=fetchSamplefile(StartFrequency,EndFrequency,COfreqs[i],"CANDELS")
+        makeGaussxBinMasksCOSMOS(cosmo,Basesamplefilename,COfreqs[i],StartFrequency,EndFrequency,sigma=sigma,miniarrlen=7,MainSequence=MainSequence ,FirstMaskname=FirstMaskname_CANDELS,SecondMaskname=SecondMaskname_CANDELS,MapSpreadParameter=3,FreqSpreadParameter=3,OriginalMapParams=[45000,29000,29000,7000,36000,7600,36600],NameParams=NameParams,ActualBeamSize=True)
+
     
 
 
-def sumMasks():
-    Types=["FirstEq"]
-
-    Sigmafiles=[#"0_5 sigma/",
-                "1_0 sigma/",
-                #"1_5 sigma/",
-                #"2_0 sigma/",
-                #"2_5 sigma/"
-                ]
+def sumMasks(BaseFolder,MaskFolder,CANDELSFolder,Base_MaskFolder,Base_Mask_CANDELSFolder):
+    """
 
 
-    for Type in Types:
-        for Sigmafile in Sigmafiles:
-        
-            
-            Basefolder="Complex Multiline Samples/15 Van Cuyck Gauss CO Masks (FirstEq)/"+Sigmafile+"Base ("+Type+")/"
-            Maskfolder="Complex Multiline Samples/15 Van Cuyck Gauss CO Masks (FirstEq)/"+Sigmafile+"Mask ("+Type+")/"
-            CANDELSfolder="Complex Multiline Samples/15 Van Cuyck Gauss CO Masks (FirstEq)/"+Sigmafile+"CANDELS ("+Type+")/"
-            
-            
-            Endfolder= "Complex Multiline Samples/15 Van Cuyck Gauss CO Masks (FirstEq)/"+Sigmafile+"Complete ("+Type+")/"
-            End_CANDELSfolder= "Complex Multiline Samples/15 Van Cuyck Gauss CO Masks (FirstEq)/"+Sigmafile+"CANDELS+Complete ("+Type+")/"
-            
-            Basefiles=os.listdir(Basefolder)
-            Maskfiles=os.listdir(Maskfolder)
-            CANDELSfiles=os.listdir(CANDELSfolder)
-            
-            for i in range(len(Basefiles)):
-                Prefix=Basefiles[i].replace("MASK_BASE","MASK_MASK")
-                for j in range(len(Maskfiles)):
-                    if Prefix in Maskfiles[j]:
-                        
-                        Base=np.load(Basefolder+Basefiles[i])
-                        Mask=np.load(Maskfolder+Maskfiles[j])
-                        print(np.shape(Base))
-                        print(np.shape(Mask))
-                        Endfile=Basefiles[i].replace("MASK_BASE","MASK_COMPLETE")
-                        print(Endfile)
-                        print("")
-                        np.save(Endfolder+Endfile,Base*Mask)
-                        
-                        
-                        Prefix=Prefix.replace("MASK_MASK","MASK_CANDELS+COMPLETE")
-                        for k in range(len(Maskfiles)):
-                            if Prefix in Maskfiles[k]:
-                                CANDELS=np.load(CANDELSfolder+CANDELSfiles[k]) #need to solve this
-                  
-        
-                                End_CANDfile=Basefiles[i].replace("MASK_BASE","MASK_CANDELS+COMPLETE")
-                                print(End_CANDfile)
-                                print("")
-                                np.save(End_CANDELSfolder+End_CANDfile,Base*Mask*CANDELS)
-                        
+    Parameters
+    ----------
+    BaseFolder : TYPE
+        DESCRIPTION.
+    MaskFolder : TYPE
+        DESCRIPTION.
+    CANDELSFolder : TYPE
+        DESCRIPTION.
+    Base_MaskFolder : TYPE
+        DESCRIPTION.
+    Base_Mask_CANDELSFolder : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
+    Basefiles=os.listdir(BaseFolder)
+    Maskfiles=os.listdir(MaskFolder)
+    CANDELSfiles=os.listdir(CANDELSFolder)
+    
+    for i in range(len(Basefiles)):
+        Prefix=Basefiles[i].replace("MASK_BASE","MASK_MASK")
+        for j in range(len(Maskfiles)):
+            if Prefix in Maskfiles[j]:
+                Base=np.load(BaseFolder+Basefiles[i])
+                Mask=np.load(MaskFolder+Maskfiles[j])
+                Base_Maskfile=Basefiles[i].replace("MASK_BASE","MASK_COMPLETE")
+                np.save(Base_MaskFolder+Base_Maskfile,Base*Mask)
+                
+                
+                PrefixCANDELS=Prefix.replace("MASK_STELLARMASK","MASK_CANDELS")
+                Base_Mask_CANDELSfile=Basefiles[i].replace("MASK_BASE","MASK_COMPLETE+COMPLETE")
+                for k in range(len(CANDELSfiles)):
+                    if PrefixCANDELS in CANDELSfiles[k]:
+                        CANDELS=np.load(Base_Mask_CANDELSFolder+CANDELSfiles[k]) #need to solve this
+
+                        np.save(Base_Mask_CANDELSFolder+Base_Mask_CANDELSfile,Base*Mask*CANDELS)
+                    
 ########################################these are for the main 4 ccat samples - 390 to 205GHz. Not touching the lower ones right now
 ########################################also, these are interactive, with or without extrap. NO WN, THAT'S SEPARATE
 #TODO
@@ -597,7 +595,7 @@ def applyMasksCII_Total(BaseFile,StoreMapSuffix,MaskSuffix,MasksFoldername,Store
             TypeUsed="Complete"
         elif MaskingOrderType[i]=="BRIGHT":
             TypeUsed="Bright"
-        Mask=np.load(MasksFoldername+"VCGAUSSMASK_"+MaskingOrderLine[i]+"_"+Freq+"GHz_"+MaskingOrderType[i]+"MASK_"+MaskSuffix+".npy")
+        Mask=np.load(MasksFoldername+"GAUSSMASK_"+MaskingOrderLine[i]+"_"+Freq+"GHz_"+MaskingOrderType[i]+"MASK_"+MaskSuffix+".npy")
         Map=Map*Mask
         
 
@@ -633,4 +631,5 @@ def applyMasksCII_Total(BaseFile,StoreMapSuffix,MaskSuffix,MasksFoldername,Store
     
     for FileMap in FilesMap:
         os.remove(StoreMapFoldername+FileMap)
+
 
