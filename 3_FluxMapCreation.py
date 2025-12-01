@@ -1,4 +1,3 @@
-
 """
 This code involves creating the flux maps to be used in creating power spectra, based on catalogue galaxy data
 These maps are 3D cubes. Galaxies from a given redshift band are painted on this map.
@@ -15,32 +14,13 @@ This is also aimed for use with CCAT/FYST, but feel free to use for other instru
 """
 
 ######################Imports the modules used. These are all fairly standard
-from astropy.io import fits
 import numpy as np
 import astropy.units as u
 from tqdm import tqdm
 from astropy.convolution import convolve
+import CANDELSextrapolation as CE
 
 
-def loadSample(Samplename):
-    """
-    Load the appropriate fits file with the relevant catalogue
-    
-    Parameters
-    ----------
-    Samplename: string
-        The pathname of the file to be loaded
-    
-    Returns
-    -------
-    numpy.ndarray
-        Data cube, in fits format. It may or may not have column data
-    """    
-    #load data cube from file and close it. Assume data is in hdul[1], true for COSMOS2020, you may need to edit for yours
-    hdul=fits.open(Samplename,memmap=True)
-    Data=hdul[1].data 
-    hdul.close()
-    return Data
 
 
 
@@ -602,7 +582,7 @@ def runFMC(cosmo,
     #to make a map, you typically need more that one file, hence doing this iteratively
     for SourceFile in SourceFiles:
         #for each file, run through the basic process
-        Data=loadSample(SourceFile)
+        Data=CE.loadSample(SourceFile)
         #arcsecs covered by a unit pixel in the COSMOS2020 catalogue. Required to calc beamsizerad from the PSF
         OriginalPixelLength=0.15 #this is fixed for COSMOS2020. If using a different catalogue with different arbitrary value, you will need to change
         BeamSizeRad=((PixelScalingFactor*OriginalPixelLength)*u.arcsecond).to(u.rad).value
@@ -630,5 +610,6 @@ def runFMC(cosmo,
     else:
         print("Failure to make cube, returning nothing")
     print("")
+
 
 
