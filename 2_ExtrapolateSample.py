@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 These messy sets of functions are the ones that make the samples used in extrapolation
 There is a hierarchy here - we must always have a FARMER LP sample cut up appropriately (e.g. FARMER LP, exept just 0.5<z<1)
@@ -19,7 +17,7 @@ E.g. following mass functions from COSMOS 2025.
 
 """
 ###import the relevant functions
-import FluxMapCreation as FMC
+import CANDELSextrapolation as CE
 import numpy as np
 from astropy.table import Table
 from tqdm import tqdm
@@ -28,107 +26,119 @@ from tqdm import tqdm
 #the schechter curve we use. Log form, consistent with previous files
 def LogSchechterCurve(logL,logphi0,a,logLc):
     """
-    
+    Returns a Schechter curve, in log format, used for fitting, or for finding the "expected" numbers of galaxies
 
     Parameters
     ----------
-    logL : TYPE
-        DESCRIPTION.
-    logphi0 : TYPE
-        DESCRIPTION.
-    a : TYPE
-        DESCRIPTION.
-    logLc : TYPE
-        DESCRIPTION.
+    logL : Float
+        Input luminosity, in log form
+    logphi0 : Float
+        Parameterisation.
+    a : Float
+        Parameterises gradient of curve
+    logLc : Float
+        Location of "knee" of Schechter curve 
 
     Returns
     -------
-    TYPE
-        DESCRIPTION.
+    Float
+        Number density for the given input luminosity
 
     """
     return logphi0-a*(logL-logLc)-(np.power(10,logL)/np.power(10,logLc))*np.log10(2.71)
 
 
-#flipping an array around, just in case we need to. Store in table format so I can make a fits file
 def flipArray(Data,BaselineArr):
     """
-    
+    Flips a 2D array and saves it as a Table, to save in a fits file. Is required due to how we filter and condense the fits files from the originals, to ensure columns are correct way around 
 
     Parameters
     ----------
-    Data : TYPE
-        DESCRIPTION.
-    BaselineArr : TYPE
-        DESCRIPTION.
+    Data : Numpy Array or List
+        Input Array
 
     Returns
     -------
-    TYPE
-        DESCRIPTION.
+    Table
+        Fits table we can then save
 
     """
-    flippedArray=[]
-    for i in tqdm(range(len(Data[0]))):
-        dummy=[] 
-        for j in range(len(Data)):
-            dummy.append(Data[j][i]) 
-        flippedArray.append(dummy)
+
+    flippedArray=np.flip(np.rot90(Data,axes=(1,0)),axis=1)
     return Table(flippedArray)
 
-#the way to find coordinates from a weigthting map - basically, the uppermost digit gives the slice, the modulo gives x and y. We return coords in the format of "COSMOS units", i.e. 0.15 arcsec, with the mask
-def findXYZ(SelectionMap,OneDProbDistr,VoronoiNumpixels,VoronoiNumslices,OriginalMapParams,StartingRedshift,EndingRedshift):
+
+#
+def findXYZ(SelectionMap,OneDProbDistr,OriginalMapParams,StartingRedshift,EndingRedshift):
     """
-    
+     the way to find coordinates from a voronoi weigthting map - basically, the uppermost digit gives the slice, the modulo gives x and y. 
+     We return coords in the format of "COSMOS units", i.e. 0.15 arcsec, with the mask, so these coordinates match the original  
 
     Parameters
     ----------
-    SelectionMap : TYPE
-        DESCRIPTION.
-    OneDProbDistr : TYPE
-        DESCRIPTION.
-    VoronoiNumpixels : TYPE
-        DESCRIPTION.
-    VoronoiNumslices : TYPE
-        DESCRIPTION.
-    OriginalMapParams : TYPE
-        DESCRIPTION.
-    StartingRedshift : TYPE
-        DESCRIPTION.
-    EndingRedshift : TYPE
-        DESCRIPTION.
+    SelectionMap : Numpy array
+        Array of size of the map, where each voxel contains its own coordinates (stored as an integer, in modulo form)
+    OneDProbDistr : Numpy Array
+        Array of same size as above, where each value contains the normalised probability of a new galaxy lying there
+    OriginalMapParams : List
+        a list of 7 values describing COSMOS. The first is the size of the cube in its arbitrary pixel units (of 0.15 arcsec). The second and third are the desired cube 
+        dimensions, in those same units, for x and y. The fourth and fifth are the lower and upper limits, in the same pixel units, for x (sixth and seventh are for y) 
+    Starting/EndingRedshift : floats
+        The redshift range we are making galaxies for
+
 
     Returns
     -------
-    x : TYPE
-        DESCRIPTION.
-    y : TYPE
-        DESCRIPTION.
-    z : TYPE
-        DESCRIPTION.
+    x,y,z : floats
+        Pixels (in COSMOS units), and redshift, of the new galaxy
 
     """
+    SliceNumber=len(SelectionMap)
+    PixelNumber=len(SelectionMap[0])
     zxy=np.random.choice(SelectionMap,1,p=OneDProbDistr)
-    z=StartingRedshift+(EndingRedshift-StartingRedshift)*(np.floor(zxy/(VoronoiNumpixels**2))+np.random.rand())/VoronoiNumslices
-    xy=zxy%(VoronoiNumpixels**2)
-    x,y=(int(xy/VoronoiNumpixels)+np.random.rand())*(OriginalMapParams[1]/VoronoiNumpixels)+OriginalMapParams[3],((xy%VoronoiNumpixels)[0]+np.random.rand())*(OriginalMapParams[2]/VoronoiNumpixels)+OriginalMapParams[5]
+    z=StartingRedshift+(EndingRedshift-StartingRedshift)*(zxy//(PixelNumber**2)+np.random.rand())/SliceNumber
+    xy=zxy%(PixelNumber**2)
+    x,y=(int(xy/PixelNumber)+np.random.rand())*(OriginalMapParams[1]/PixelNumber)+OriginalMapParams[3],((xy%PixelNumber)[0]+np.random.rand())*(OriginalMapParams[2]/PixelNumber)+OriginalMapParams[5]
     return x,y,z
 
 
-
-
-##########################
 #TODO
-#This is basically just the mask we get from the basic sample. We use pixel params to decide where the galaxies are
-#We will need to do this using different masks when looking at z>6.3 or z<6.3
-#The frequency of the mask we use doesn't actually matter, as long as we use the appropriate pixel scaling factor
-#WE MUST HAVE A "TRIMMED DOWN" SAMPLE FOR THIS TO WORK
-def extrapolateSampleViaMask(MainFilename,TemplateMaskFilename,ExtrapolatedMaskFilename,StartingRedshift,EndingRedshift,OriginalMapParams,PixelScalingFactor,indexRedshift="",indexXpix="",indexYpix="",indexMass="",indexSFR="",indexLIR="",indexOIII=""): #here StartingLimitingRedshift is the redshift we start generating from, PreviousFilename is what we load from
-        
+
+def extrapolateSampleViaMask(MainFilename,TemplateMaskFilename,ExtrapolatedMaskFilename,StartingRedshift,EndingRedshift,OriginalMapParams,PixelScalingFactor,
+                             NameParams={"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}):
+    """
+    This is basically just the mask we get from the basic sample. We use pixel params to decide where the galaxies are
+    We will need to do this using different masks when looking at z>6.3 or z<6.3
+    The frequency of the mask we use doesn't actually matter, as long as we use the appropriate pixel scaling factor
+
+    Parameters
+    ----------
+    MainFilename : TYPE
+        DESCRIPTION.
+    TemplateMaskFilename : TYPE
+        DESCRIPTION.
+    ExtrapolatedMaskFilename : TYPE
+        DESCRIPTION.
+    Starting/EndingRedshift : floats
+        The redshift range we are making galaxies for
+    OriginalMapParams : List
+        a list of 7 values describing COSMOS. The first is the size of the cube in its arbitrary pixel units (of 0.15 arcsec). The second and third are the desired cube 
+        dimensions, in those same units, for x and y. The fourth and fifth are the lower and upper limits, in the same pixel units, for x (sixth and seventh are for y) 
+    PixelScalingFactor: float
+        The size of the beam in the aforementioned arbitrary pixel units (e.g. 37.2 arcsec -> 248). This is used to convert the galaxy locations from the pixel units into the pixels we use for our maps
+    NameParams : TYPE, optional
+        DESCRIPTION. The default is {"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}.
+
+    Returns
+    -------
+    None.
+
+    """
+    
 
 
     #we take the original sample, and also the mask. We find each pixel with no signal
-    Data=FMC.loadSample(MainFilename)
+    Data=CE.loadSample(MainFilename)
     MaskMap=np.load(TemplateMaskFilename,allow_pickle=True)
     MaskPixels=[]
     for i in range(len(MaskMap)):
@@ -202,7 +212,9 @@ def extrapolateSampleViaMask(MainFilename,TemplateMaskFilename,ExtrapolatedMaskF
 #When I have a given sample (sample+mask) and we want to make a voronoi map from it, we need to use this
 #In this case we can weight by log_mass or log_LIR, user choice
 #The voronoi map we used is ALWAYS normalised to 10 slices, 100x100 pixels. Have hardcoded
-def calcVoronoiMap(MainFilename,MaskFilename,VoronoiFilename,StartingRedshift,EndingRedshift,OriginalMapParams,WeightOrders,indexRedshift="",indexXpix="",indexYpix="",indexMass="",indexSFR="",indexLIR="",indexOIII="",WeightingMethod="Mass"):
+def calcVoronoiMap(MainFilename,MaskFilename,VoronoiFilename,StartingRedshift,EndingRedshift,OriginalMapParams,WeightOrders,
+                   NameParams={"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"},
+                   WeightingMethod="Mass"):
     """
     
 
@@ -214,30 +226,16 @@ def calcVoronoiMap(MainFilename,MaskFilename,VoronoiFilename,StartingRedshift,En
         DESCRIPTION.
     VoronoiFilename : TYPE
         DESCRIPTION.
-    StartingRedshift : TYPE
-        DESCRIPTION.
-    EndingRedshift : TYPE
-        DESCRIPTION.
-    OriginalMapParams : TYPE
-        DESCRIPTION.
+    Starting/EndingRedshift : floats
+        The redshift range we are making galaxies for
+    OriginalMapParams : List
+        a list of 7 values describing COSMOS. The first is the size of the cube in its arbitrary pixel units (of 0.15 arcsec). The second and third are the desired cube 
+        dimensions, in those same units, for x and y. The fourth and fifth are the lower and upper limits, in the same pixel units, for x (sixth and seventh are for y) 
     WeightOrders : TYPE
         DESCRIPTION.
-    indexRedshift : TYPE, optional
+    NameParams : TYPE, optional
         DESCRIPTION. The default is "".
-    indexXpix : TYPE, optional
-        DESCRIPTION. The default is "".
-    indexYpix : TYPE, optional
-        DESCRIPTION. The default is "".
-    indexMass : TYPE, optional
-        DESCRIPTION. The default is "".
-    indexSFR : TYPE, optional
-        DESCRIPTION. The default is "".
-    indexLIR : TYPE, optional
-        DESCRIPTION. The default is "".
-    indexOIII : TYPE, optional
-        DESCRIPTION. The default is "".
-    WeightingMethod : TYPE, optional
-        DESCRIPTION. The default is "Mass".
+    
 
     Returns
     -------
@@ -247,11 +245,11 @@ def calcVoronoiMap(MainFilename,MaskFilename,VoronoiFilename,StartingRedshift,En
     
     
     
-    Data=FMC.loadSample(MainFilename)
-    MaskData=FMC.loadSample(MaskFilename)
+    Data=CE.loadSample(MainFilename)
+    MaskData=CE.loadSample(MaskFilename)
     log_mass,log_LIR,zpix,xpix,ypix=[],[],[],[],[]
     #hardcoded the limits for now
-    Numslices,Numpixels=10,100
+    VoronoiSliceNumber,VoronoiPixelNumber=10,100
     
     ########if sample behaves, can concanetate sample using
     #Data=np.asarray(Data,MaskData)
@@ -259,54 +257,84 @@ def calcVoronoiMap(MainFilename,MaskFilename,VoronoiFilename,StartingRedshift,En
         if not np.isnan(Data[i][indexMass]) and not np.isnan(Data[i][indexSFR]) and not np.isnan(Data[i][indexLIR]) and not np.isnan(Data[i][indexOIII]):
             log_mass.append(Data[i][indexMass])
             log_LIR.append(np.log10(Data[i][indexLIR]))
-            xpix.append(round((Data[i][indexXpix]-OriginalMapParams[3])/(OriginalMapParams[1]/Numpixels)))
-            ypix.append(round((Data[i][indexYpix]-OriginalMapParams[5])/(OriginalMapParams[2]/Numpixels)))
-            zpix.append(np.floor(Numslices*(EndingRedshift-Data[i][indexRedshift])/(EndingRedshift-StartingRedshift)))
+            xpix.append(round((Data[i][indexXpix]-OriginalMapParams[3])/(OriginalMapParams[1]/VoronoiPixelNumber)))
+            ypix.append(round((Data[i][indexYpix]-OriginalMapParams[5])/(OriginalMapParams[2]/VoronoiPixelNumber)))
+            zpix.append(Numslices*(EndingRedshift-Data[i][indexRedshift])//(EndingRedshift-StartingRedshift))
     for j in tqdm(range(len(MaskData))):
         if not np.isnan(MaskData[j][indexMass]) and not np.isnan(Data[i][indexSFR]) and not np.isnan(MaskData[j][indexLIR]) and not np.isnan(MaskData[j][indexOIII]):
             log_mass.append(MaskData[j][indexMass])
             log_LIR.append(np.log10(MaskData[j][indexLIR]))
-            xpix.append(round((MaskData[j][indexXpix]-OriginalMapParams[3])/(OriginalMapParams[1]/Numpixels)))
-            ypix.append(round((MaskData[j][indexYpix]-OriginalMapParams[5])/(OriginalMapParams[2]/Numpixels)))
-            zpix.append(np.floor(Numslices*(EndingRedshift-MaskData[j][indexRedshift])/(EndingRedshift-StartingRedshift)))
+            xpix.append(round((MaskData[j][indexXpix]-OriginalMapParams[3])/(OriginalMapParams[1]/VoronoiPixelNumber)))
+            ypix.append(round((MaskData[j][indexYpix]-OriginalMapParams[5])/(OriginalMapParams[2]/VoronoiPixelNumber)))
+            zpix.append(Numslices*(EndingRedshift-MaskData[j][indexRedshift])//(EndingRedshift-StartingRedshift))
     if WeightingMethod=="Number": IndivWeight=np.ones(len(log_mass)) #normalised weights, which we multiply by weightorders
     elif WeightingMethod=="Mass": IndivWeight=log_mass/np.max(log_mass)
-    WeightingMap=np.zeros((Numslices,Numpixels,Numpixels))+WeightOrders[0] #i.e. we have a base weighting
+    WeightingMap=np.zeros((Numslices,VoronoiPixelNumber,VoronoiPixelNumber))+WeightOrders[0] #i.e. we have a base weighting
     centre,outer,v_outer=WeightOrders[1],WeightOrders[2],WeightOrders[3]
     #for each galaxy that we use, we assign a given weighting, spread around multiple pickles
     for i in tqdm(range(len(IndivWeight))):
         z,x,y=int(zpix[i]),xpix[i],ypix[i]
-        if not(x>=Numpixels) and not(y>=Numpixels):  
+        if not(x>=VoronoiPixelNumber) and not(y>=VoronoiPixelNumber):  
             #we set the weight of the central pixel
             WeightingMap[z][y][x]=WeightingMap[z][y][x]+centre*IndivWeight[i]
             #we set the weight of surrounding pixels (ignoring ones that would lie outside the map)
-            if x+1<Numpixels: WeightingMap[z][y][x+1]=WeightingMap[z][y][x+1]+outer*IndivWeight[i] #we need to set everything to a conditional for the surrounding pixels
+            if x+1<VoronoiPixelNumber: WeightingMap[z][y][x+1]=WeightingMap[z][y][x+1]+outer*IndivWeight[i] #we need to set everything to a conditional for the surrounding pixels
             if x-1>=0: WeightingMap[z][y][x-1]=WeightingMap[z][y][x-1]+outer*IndivWeight[i] #just in case this is a non-existent pixels
-            if y+1<Numpixels: WeightingMap[z][y+1][x]=WeightingMap[z][y+1][x]+outer*IndivWeight[i]
+            if y+1<VoronoiPixelNumber: WeightingMap[z][y+1][x]=WeightingMap[z][y+1][x]+outer*IndivWeight[i]
             if y-2>=0: WeightingMap[z][y-1][x]=WeightingMap[z][y-1][x]+outer*IndivWeight[i]
             #we set the weight of pixels further out
-            if x+2<Numpixels: WeightingMap[z][y][x+2]=WeightingMap[z][y][x+2]+v_outer*IndivWeight[i]
+            if x+2<VoronoiPixelNumber: WeightingMap[z][y][x+2]=WeightingMap[z][y][x+2]+v_outer*IndivWeight[i]
             if x-2>=0: WeightingMap[z][y][x-2]=WeightingMap[z][y][x-2]+v_outer*IndivWeight[i]
-            if y+2<Numpixels: WeightingMap[z][y+2][x]=WeightingMap[z][y+2][x]+v_outer*IndivWeight[i]
+            if y+2<VoronoiPixelNumber: WeightingMap[z][y+2][x]=WeightingMap[z][y+2][x]+v_outer*IndivWeight[i]
             if y-2>=0: WeightingMap[z][y-2][x]=WeightingMap[z][y-2][x]+v_outer*IndivWeight[i]
-            if x+1<Numpixels and y+1<Numpixels: WeightingMap[z][y+1][x+1]=WeightingMap[z][y+1][x+1]+v_outer*IndivWeight[i]
-            if x+1<Numpixels and y-1>=0:WeightingMap[z][y-1][x+1]=WeightingMap[z][y-1][x+1]+v_outer*IndivWeight[i]
-            if x-1>=0 and y+1<Numpixels:WeightingMap[z][y+1][x-1]=WeightingMap[z][y+1][x-1]+v_outer*IndivWeight[i]
+            if x+1<VoronoiPixelNumber and y+1<VoronoiPixelNumber: WeightingMap[z][y+1][x+1]=WeightingMap[z][y+1][x+1]+v_outer*IndivWeight[i]
+            if x+1<VoronoiPixelNumber and y-1>=0:WeightingMap[z][y-1][x+1]=WeightingMap[z][y-1][x+1]+v_outer*IndivWeight[i]
+            if x-1>=0 and y+1<VoronoiPixelNumber:WeightingMap[z][y+1][x-1]=WeightingMap[z][y+1][x-1]+v_outer*IndivWeight[i]
             if x-1>=0 and y-1>=0:WeightingMap[z][y-1][x-1]=WeightingMap[z][y-1][x-1]+v_outer*IndivWeight[i]
     np.save(VoronoiFilename,np.asarray(WeightingMap),allow_pickle=True)
 
-# calcVoronoiMap("Basic Samples/New Interp Method Old Bands/COSMOS_FARMER_SIMPLIFIED_z~3,42-3,87_MagU26.fits", "Basic Samples/New Interp Method Old Bands/COSMOS_FARMER_SIMPLIFIED_z~3,42-3,87_MagU26_MASK.fits", "Basic Samples/New Interp Method Old Bands/COSMOS_FARMER_SIMPLIFIED_z~3,42-3,87_MagU26_VORONOI_MASS.npy", [45000,29000,29000,7000,36000,7600,36600], "Mass", [1,6,4,2], 3.42, 3.87)
 
 ###############################
 #TODO
 #Once we have the original file, the mask data, and the voronoi data, we start with the candels stuff
-def extrapolateSampleViaCANDELs(MainFilename,MaskFilename,VoronoiFilename,CANDELsFilename,CANDELsFactor,StartingRedshift,EndingRedshift,OriginalMapParams,MassLim="",indexRedshift="",indexXpix="",indexYpix="",indexMass="",indexSFR="",indexLIR="",indexOIII=""): # Here we do this seperately for each filename. We do it seperately for the OG sample, for the Mask, for the
-        
+def extrapolateSampleViaCANDELs(MainFilename,MaskFilename,VoronoiFilename,CANDELsFilename,CANDELsFactor,StartingRedshift,EndingRedshift,OriginalMapParams,
+                                MinMassLim="",
+                                NameParams={"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}):
+    """
+    
+
+    Parameters
+    ----------
+    MainFilename : TYPE
+        DESCRIPTION.
+    MaskFilename : TYPE
+        DESCRIPTION.
+    VoronoiFilename : TYPE
+        DESCRIPTION.
+    CANDELsFilename : TYPE
+        DESCRIPTION.
+    CANDELsFactor : TYPE
+        DESCRIPTION.
+    Starting/EndingRedshift : floats
+        The redshift range we are making galaxies for
+    OriginalMapParams : List
+        a list of 7 values describing COSMOS. The first is the size of the cube in its arbitrary pixel units (of 0.15 arcsec). The second and third are the desired cube 
+        dimensions, in those same units, for x and y. The fourth and fifth are the lower and upper limits, in the same pixel units, for x (sixth and seventh are for y) 
+    MinMassLim : TYPE, optional
+        DESCRIPTION. The default is "".
+    NameParams : TYPE, optional
+        DESCRIPTION. The default is {"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}.
+
+    Returns
+    -------
+    None.
+
+    """    
 
 
     #get all the data we need
-    OriginalData=FMC.loadSample(MainFilename)
-    MaskData=FMC.loadSample(MaskFilename)
+    OriginalData=CE.loadSample(MainFilename)
+    MaskData=CE.loadSample(MaskFilename)
     #Data=np.append(DataOrig,DataMask)
     Data=[]
     for i in range(len(OriginalData)):
@@ -316,10 +344,9 @@ def extrapolateSampleViaCANDELs(MainFilename,MaskFilename,VoronoiFilename,CANDEL
     
     PerCounter=0
     #Now the voronoi parameters. Hard code these maps for now. We have our mask selection
-    VoronoiNumslices,VoronoiNumpixels=10,100
     VoronoiMap=np.load(VoronoiFilename,allow_pickle=True)
     OneDProbDistr=VoronoiMap.flatten()/np.sum(VoronoiMap)
-    SelectionMap=np.arange(0,VoronoiNumslices*(VoronoiNumpixels**2),1)
+    SelectionMap=np.arange(0,VoronoiSliceNumber*(VoronoiPixelNumber**2),1)
     
     
     ###set limiter on the CANDELS
@@ -360,18 +387,18 @@ def extrapolateSampleViaCANDELs(MainFilename,MaskFilename,VoronoiFilename,CANDEL
     
     if CANDELsFactor==1:
         NewData.append(Data[0])
-        x,y,z=findXYZ(SelectionMap,OneDProbDistr,VoronoiNumpixels,VoronoiNumslices,OriginalMapParams,StartingRedshift,EndingRedshift)
+        x,y,z=findXYZ(SelectionMap,OneDProbDistr,OriginalMapParams,StartingRedshift,EndingRedshift)
 
         NewData[-1][indexXpix],NewData[-1][indexYpix],NewData[-1][indexRedshift]=x,y,z
     for j in tqdm(range(len(Data))):
-        if Data[j][indexMass]>MassLim:
+        if Data[j][indexMass]>MinMassLim:
             #also have this limit
             if Data[j][indexMass]<MaxMass and Data[j][indexSFR]<MaxSFR and Data[j][indexLIR]<MaxLIR and Data[j][indexOIII]<MaxOIII  and OriginalMapParams[3]<Data[j][3] and OriginalMapParams[4]>Data[j][3] and OriginalMapParams[5]<Data[j][4] and OriginalMapParams[6]>Data[j][4]:
                 PerCounter=PerCounter+(1-CANDELsFactor)/CANDELsFactor
                 while PerCounter>1:
                     NewData.append(Data[j])
                     
-                    x,y,z=findXYZ(SelectionMap,OneDProbDistr,VoronoiNumpixels,VoronoiNumslices,OriginalMapParams,StartingRedshift,EndingRedshift)
+                    x,y,z=findXYZ(SelectionMap,OneDProbDistr,OriginalMapParams,StartingRedshift,EndingRedshift)
     
                     NewData[-1][indexXpix],NewData[-1][indexYpix],NewData[-1][indexRedshift]=x,y,z
                     PerCounter=PerCounter-1
@@ -391,11 +418,50 @@ def extrapolateSampleViaCANDELs(MainFilename,MaskFilename,VoronoiFilename,CANDEL
 #TODO
 
 
-def ALTextrapolateSampleViaMassF(MainFilename,MaskFilename,VoronoiFilename,CANDELSFilename,MassFFilename,StartingRedshift,EndingRedshift,OriginalMapParams,SchechterParams,Volume,Dex,MinMass,GalaxyMSParams,MaxMass=0,MassIndex=300,SFRIndex=304,RedshiftIndex=269,LIRIndex=342,OIIIIndex=349,SFRDex=0.5):
+def extrapolateSampleViaMassF(MainFilename,MaskFilename,VoronoiFilename,CANDELSFilename,MassFFilename,StartingRedshift,EndingRedshift,OriginalMapParams,SchechterParams,Volume,Dex,MinMass,GalaxyMSParams,
+                              NameParams={"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}):
+    """
+    
+
+    Parameters
+    ----------
+    MainFilename : TYPE
+        DESCRIPTION.
+    MaskFilename : TYPE
+        DESCRIPTION.
+    VoronoiFilename : TYPE
+        DESCRIPTION.
+    CANDELSFilename : TYPE
+        DESCRIPTION.
+    MassFFilename : TYPE
+        DESCRIPTION.
+    Starting/EndingRedshift : floats
+        The redshift range we are making galaxies for
+    OriginalMapParams : List
+        a list of 7 values describing COSMOS. The first is the size of the cube in its arbitrary pixel units (of 0.15 arcsec). The second and third are the desired cube 
+        dimensions, in those same units, for x and y. The fourth and fifth are the lower and upper limits, in the same pixel units, for x (sixth and seventh are for y) 
+    SchechterParams : TYPE
+        DESCRIPTION.
+    Volume : TYPE
+        DESCRIPTION.
+    Dex : TYPE
+        DESCRIPTION.
+    MinMass : TYPE
+        DESCRIPTION.
+    GalaxyMSParams : TYPE
+        DESCRIPTION.
+    NameParams : TYPE, optional
+        DESCRIPTION. The default is {"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}.
+
+    Returns
+    -------
+    None.
+
+    """
     #import data, make into a big list
-    OriginalData=FMC.loadSample(MainFilename)
-    MaskData=FMC.loadSample(MaskFilename)
-    CANDELSData=FMC.loadSample(CANDELSFilename)
+    OriginalData=CE.loadSample(MainFilename)
+    MaskData=CE.loadSample(MaskFilename)
+    CANDELSData=CE.loadSample(CANDELSFilename)
     #Data=np.append(OriginalData,[MaskData,CANDELSData])
     Data=[]
     for i in range(len(OriginalData)):
@@ -430,10 +496,10 @@ def ALTextrapolateSampleViaMassF(MainFilename,MaskFilename,VoronoiFilename,CANDE
     print(ModelMassFunction)
     print(ModelNumbers)
     #set up voronoi parameters for comparison
-    VoronoiNumslices,VoronoiNumpixels=10,100
+    VoronoiSliceNumber,VoronoiPixelNumber=10,100
     VoronoiMap=np.load(VoronoiFilename,allow_pickle=True)
     OneDProbDistr=VoronoiMap.flatten()/np.sum(VoronoiMap)
-    SelectionMap=np.arange(0,VoronoiNumslices*(VoronoiNumpixels**2),1)
+    SelectionMap=np.arange(0,VoronoiSliceNumber*(VoronoiPixelNumber**2),1)
     
     #Right: For each mass interval, we find the existing galaxies that lie within it, and record their indexes. This gives us the number of galaxies we need to generate
     #Make galaxies in a very similar way, position accordingly, etc. The problem is, if there is no currently existing galaxies in the band, we can't generate!
@@ -489,29 +555,14 @@ def ALTextrapolateSampleViaMassF(MainFilename,MaskFilename,VoronoiFilename,CANDE
                     
 
                     #NEED TO CHANGE LIR; OIII
-                x,y,z=findXYZ(SelectionMap,OneDProbDistr,VoronoiNumpixels,VoronoiNumslices,OriginalMapParams,StartingRedshift,EndingRedshift)
+                x,y,z=findXYZ(SelectionMap,OneDProbDistr,OriginalMapParams,StartingRedshift,EndingRedshift)
     
                 NewData[counter][3],NewData[counter][4],NewData[counter][RedshiftIndex]=x,y,z
                 
-                ###print(NewData[counter][SFRIndex],NewData[counter][LIRIndex],NewData[counter][OIIIIndex])
-                counter=counter+1
-                NumberToMake=NumberToMake-1
-                
-        print(NumberToMake)
-        print(counter)
-        print(NumberToMake+counter)
-    
-    
 
-    print(len(NewData))
-    print(len(NewData[0]))
-    
-    
     
     #flip array and save!
     t = flipArray(NewData,Data[0]) 
     t.write(MassFFilename, format='fits',overwrite=True) 
     
-
-
 
