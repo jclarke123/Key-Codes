@@ -22,9 +22,6 @@ import CANDELSextrapolation as CE
 
 
 
-
-
-
 def fetchVariablesCOSMOS(Data,StartingRedshift,EndingRedshift,OriginalMapParams,PixelScalingFactor,SliceNumber,RestFrequency,NameParams,MapSpreadParameter=1,FreqSpreadParameter=1):
     """
     For a given input fits file, load values
@@ -35,7 +32,7 @@ def fetchVariablesCOSMOS(Data,StartingRedshift,EndingRedshift,OriginalMapParams,
     Parameters
     -------
     Data: numpy.ndarray
-        The catalogue data
+        The catalogue data we imported
     StartingRedshift, EndingRedshift: float
         The redshift range we want to draw data from
     OriginalMapParams: list
@@ -60,26 +57,23 @@ def fetchVariablesCOSMOS(Data,StartingRedshift,EndingRedshift,OriginalMapParams,
         Returns the dictionary of the core properties used to make models with. Can modify and extend as needed
     """  
     #NameParams is a dictionary of a dictionary, to allow for different column names for the source files
-    nameLIR,nameLogMass,nameLogSFR,nameRedshift,nameOIII=NameParams["LIR"],NameParams["log_mass"],NameParams["log_SFR"],NameParams["Redshift"],NameParams["OIII"]
-    nameX,nameY,nameFlag,nameRedshifterr=NameParams["x_orig"],NameParams["y_orig"],NameParams["FLAG"],NameParams["Redshift_err"] 
+    nameLIR,nameLogMass,nameLogSFR,nameRedshift,nameOIII,nameX,nameY,nameFlag,nameRedshifterr=NameParams["LIR"],NameParams["log_mass"],NameParams["log_SFR"],NameParams["Redshift"],NameParams["OIII"],NameParams["x_orig"],NameParams["y_orig"],NameParams["FLAG"],NameParams["Redshift_err"] 
     
-    #check to see if there are any galaxies in the source file
+    #check to see if there are any galaxies in the source file (sometimes not at high redshift for stellar mask)
     if len(Data)!=0:
         Failure=False    
-        
-        
-        #load all data
+            
+        #load data we use to verify the correct galaxies
         Flags=Data[nameFlag]
         Redshift=Data[nameRedshift]
         x=Data[nameX]
         y=Data[nameY]
         
-        
         #this ensures all galaxies are within our given range and the given map bounds, that the galaxy is flagged as a galaxy. You will need custom checks for input files,
         #will have to edit this/provide different versions if using different inputs. This JUST works for COSMOS2020
         ValidIndexes=(Redshift>StartingRedshift)*(Redshift<EndingRedshift)*(Flags==0)*(x>=OriginalMapParams[3])*(x<=OriginalMapParams[4])*(y>=OriginalMapParams[5])*(y<=OriginalMapParams[6]) #all the validity stuff from earlier
         
-        #for those galaxies, we load all relevant data
+        #for those valid galaxies, we load all relevant data
         Redshift=Redshift[ValidIndexes]
         #we have to recenter the arbitrary pixel scale of COSMOS2020 to originate from 0,0, and 1 pixel to refer to 1/3 FWHM of the beam, requriing "MapSpreadParameter" and PixelScalingFactor
         xpix=np.round((x[ValidIndexes]-OriginalMapParams[3])*MapSpreadParameter/PixelScalingFactor)
@@ -89,7 +83,7 @@ def fetchVariablesCOSMOS(Data,StartingRedshift,EndingRedshift,OriginalMapParams,
         Redshift_err=Data[nameRedshifterr][ValidIndexes]-Redshift
         OIII=Data[nameOIII][ValidIndexes]
         LIR=Data[nameLIR][ValidIndexes]
-        #error handling for when we take log of these values
+        #error handling for when we take log of these values later on
         OIII[OIII<0]=0
         LIR[LIR<0]=0
         log_OIII=np.log10(OIII)
@@ -97,7 +91,7 @@ def fetchVariablesCOSMOS(Data,StartingRedshift,EndingRedshift,OriginalMapParams,
         #using Mannucci+2010 metallicity calculation for any models. Can edit if desired
         log_met=8.90+0.37*(log_mass-10)-0.14*(log_SFR)-0.19*(log_mass-10)**2+0.12*(log_mass-10)*(log_SFR)-0.054*(log_SFR)**2
         
-        #calculate z index in the frequency cube based on redshift
+        #calculate relative z index in the frequency cube based on redshift
         StartFrequency=RestFrequency/(EndingRedshift+1)
         EndFrequency=RestFrequency/(StartingRedshift+1)
         Frequencies=RestFrequency/(Redshift+1)
@@ -105,6 +99,7 @@ def fetchVariablesCOSMOS(Data,StartingRedshift,EndingRedshift,OriginalMapParams,
         zpix.astype(int)
         
     else:
+        #error handling, if no valid galaxies for a particular file. We run this for multiple files, so this may be the case
         Failure=True
         Flags,Redshift,xpix,ypix,log_mass,log_SFR,Redshift_err,log_OIII,log_LIR=[],[],[],[],[],[],[],[],[]
         zpix=[]
@@ -178,7 +173,7 @@ def calcLsun(VariableList,VariableLabel1,VariableLabel2,ModelCoefficients):
         #If it is just a 1D model (indicated by "None" for two variables), we can just finish up here, using the generic model.
         if VariableLabel2=='None':
             LumArray=ModelCoefficients[0]+ModelCoefficients[1]*ModelVar1+ModelCoefficients[2]*(ModelVar1**2) 
-        #otherwise it's 2D, so we must load the second variable
+        #otherwise it's 2D, so we must load the second variable and calculate
         else:
             if VariableLabel2=='Log Mass':
                 ModelVar2=VariableList["log_mass"]
@@ -194,16 +189,15 @@ def calcLsun(VariableList,VariableLabel1,VariableLabel2,ModelCoefficients):
                 ModelVar2=VariableList["log_mass"]-10
             elif VariableLabel2=='Log LIR':
                 ModelVar2=VariableList["log_LIR"]
-            #similar idea, but calc is more complex
+            #similar idea, but calc is 2D
             LumArray=ModelCoefficients[0]+ModelCoefficients[1]*ModelVar1+ModelCoefficients[2]*(ModelVar1**2)+ModelCoefficients[3]*ModelVar2+ModelCoefficients[4]*(ModelVar2**2)+ModelCoefficients[5]*ModelVar1*ModelVar2
-    #the above can be extended to include 3, 4+ dimensiona models, with different bulk properties, or different custom models
+    #the above can be extended if needed
     
     #We have this to catch any problematic results
-    for i in range(len(LumArray)):
-        if np.isnan(LumArray[i]) or np.isinf(LumArray[i]) or LumArray[i]<=0:
-            LumArray[i]=0
-    return LumArray
+    ProblematicIndexes=(LumArray<=0)+(np.isnan(LumArray))+(np.isinf(LumArray))
+    LumArray[ProblematicIndexes]=0
 
+    return LumArray
 
 
 def galMainSeq(x,a,b):
@@ -227,8 +221,6 @@ def galMainSeq(x,a,b):
 
     """
     return a+b*x
-
-
 
 def conversionCOSLED(VariableList,CO10LumArray,muCoeff1,muCoeff2,Transition,SLEDFilename,MSFilename,SLEDType="Normal"):
     """
@@ -265,10 +257,12 @@ def conversionCOSLED(VariableList,CO10LumArray,muCoeff1,muCoeff2,Transition,SLED
 
     """
     #load up the Upper and Lower elements of the SLED
+    
+    
+    
     SLEDArray=np.load(SLEDFilename)
-    for f in range(len(SLEDArray)):
-        if SLEDArray[f][0]==Transition:
-            LowerSLR,UpperSLR=SLEDArray[f][1],SLEDArray[f][2]
+    SLEDIndex=np.where(SLEDArray[:,0]==Transition)
+    LowerSLR,UpperSLR=SLEDArray[SLEDIndex][1],SLEDArray[SLEDIndex][2]
             
             
     #we load the main sequence of COSMOS2020 for each z~0.5 interval, derived earlier.
@@ -276,28 +270,37 @@ def conversionCOSLED(VariableList,CO10LumArray,muCoeff1,muCoeff2,Transition,SLED
     Redshifts=VariableList["Redshift"]
     log_mass=VariableList["log_mass"]
     log_SFR=VariableList["log_SFR"]
+    
+    
+    #dummy, placeholder
     COLumArray=np.zeros(len(CO10LumArray))
+    log_SFR_MSGal=np.zeros(len(Redshifts))
+    dMS=np.zeros(len(Redshifts)) 
+    mu=np.zeros(len(Redshifts))
     
     #for each galaxy, we check where it is within redshift to determine main sequences
     #for this, we calculate the delta in main sequence, which is then used to calibrate mu
     #Upper/Lower SLR are calibration values from example galaxies
     #These are log values, so we add to logLCO instead of multiplying
-    for i in tqdm(range(len(CO10LumArray))):
-        for j in range(len(MSArray)):
-            if Redshifts[i]>=MSArray[j][0] and Redshifts[i]<MSArray[j][1]:
-                if SLEDType=="Normal":
-                    log_SFR_MSGal=galMainSeq(log_mass[i],MSArray[j][3],MSArray[j][2])
-                    dMS=log_SFR[i]-log_SFR_MSGal
-                    mu=(dMS+muCoeff1)/muCoeff2
-                #we can force maximum or minimum CO models if needed
-                elif SLEDType=="Upper":
-                    mu=1
-                elif SLEDType=="Lower":
-                    mu=0
-                elif SLEDType=="Average":
-                    mu=0.5
-                #use linear combination based on main sequence
-                COLumArray[i]=mu*(UpperSLR+CO10LumArray[i])+(1-mu)*(LowerSLR+CO10LumArray[i])
+
+    
+    #need to do this separately for each Main Sequence, as a given cube may have overlap with different z~0.5 segments, and these have separate MS values
+    for j in range(len(MSArray)):
+        ValidIndex=(Redshifts>=MSArray[j][0])*(Redshifts<MSArray[j][1])
+        #if Redshifts[i]>=MSArray[j][0] and Redshifts[i]<MSArray[j][1]:
+        if SLEDType=="Normal":
+            log_SFR_MSGal[ValidIndex]=galMainSeq(log_mass[ValidIndex],MSArray[j][3],MSArray[j][2])
+            dMS[ValidIndex]=log_SFR[ValidIndex]-log_SFR_MSGal[ValidIndex]
+            mu[ValidIndex]=(dMS[ValidIndex]+muCoeff1)/muCoeff2
+        #we can force maximum or minimum CO models if needed
+        elif SLEDType=="Upper":
+            mu[ValidIndex]=1
+        elif SLEDType=="Lower":
+            mu[ValidIndex]=0
+        elif SLEDType=="Average":
+            mu[ValidIndex]=0.5
+        #use linear combination based on main sequence
+        COLumArray[ValidIndex]=mu[ValidIndex]*(UpperSLR+CO10LumArray[ValidIndex])+(1-mu)*(LowerSLR+CO10LumArray[ValidIndex])
     return COLumArray
 
 
@@ -390,15 +393,10 @@ def createSimple3DMap(VariableList,FluxArray,SliceNumber,MapLength,MapSpreadPara
     """
     xpix,ypix,zpix=VariableList["xpix"],VariableList["ypix"],VariableList["zpix"]
     #in the case where we don't subdivide, this is simply inserting flux into correct voxel
-    #if we do subdivide, this is just stage 1
+    #if we do subdivide, this is just stage 1, as we then convolve
     FluxCube=np.zeros((SliceNumber*FreqSpreadParameter,MapLength*MapSpreadParameter,MapLength*MapSpreadParameter),dtype=np.float32)
-    print(np.shape(FluxCube))
     for i in tqdm(range(len(FluxArray))):
-        #just a last minute check
-        if xpix[i]<MapLength*MapSpreadParameter and ypix[i]<MapLength*MapSpreadParameter and xpix[i]>=0 and ypix[i]>=0:
-            #insert flux
-            FluxCube[zpix[i]][ypix[i]][xpix[i]]=FluxCube[zpix[i]][ypix[i]][xpix[i]]+FluxArray[i]
-    
+        FluxCube[zpix[i]][ypix[i]][xpix[i]]=FluxCube[zpix[i]][ypix[i]][xpix[i]]+FluxArray[i]
     return FluxCube
 
 
@@ -495,10 +493,11 @@ def convolveKernel3DMap(FluxCube,SliceNumber,MapLength,ConvMap=False,ConvZ=False
     """
     if ConvMap:
         #note - the kernel size being too large (i.e. size of map) would make this far too slow
-        #therefore, this should help reduce the kernel size. Also, use ML*MSP-2, just in case that's smaller than 15,
+        #therefore, this should help reduce the kernel size. Or, use ML*MSP-2 (largest safe value), just in case that's smaller than 15,
         #as if kernelsize>mapsize, can run into problems. In 99% of cases, a size of 15 should be more than enough
         kernsize=int(min(MapLength*MapSpreadParameter-2,pixel_kern))
         gausskern=gaussian_kernel_2d(MapSpreadParameter, kernsize)
+        #we convolve each 2D slice separately
         for j in tqdm(range(len(FluxCube))):
             FluxCube[j]=convolve(FluxCube[j], gausskern)
 
@@ -506,6 +505,7 @@ def convolveKernel3DMap(FluxCube,SliceNumber,MapLength,ConvMap=False,ConvZ=False
         #this taken from Ankur Dev's data_cube_scripts
         kernsize=int(min(SliceNumber*FreqSpreadParameter-2,pixel_kern))
         lornkern=lorentzian_kernel_1d(FreqSpreadParameter,kernsize)
+        #this applies to each pixel in the map plane
         FluxCube = np.apply_along_axis(lambda spectrum: convolve(spectrum, lornkern, boundary='extend'),
                                                 axis=0, arr=FluxCube)
     return FluxCube
@@ -524,7 +524,8 @@ def runFMC(cosmo,
     (if a CO line, we typically propagate along a SLED)
     Flux is then calculated (units of Jy/sr), sorted into the flux cube, then any beam convolution is done
     We then save the cube in a .npz file, with valuable metadata for power spectra calcs
-    
+    This is currently compatible with COSMOS2020 and FYST/CCAT, but edits to fetchVariables should make this compatible with any catalogue set
+
     
     Parameters
     ----------
@@ -562,7 +563,7 @@ def runFMC(cosmo,
     COModel : boolean, optional
         IF we use a CO model, we need to take certain things into account. The default is False.
     COTransition : int, optional
-        The exact CO transisiton we use (the upper J value use). The default is 1.
+        The exact CO transisiton we use (the upper J value used). The default is 1.
     muCoeff1,muCoeff2 : floats, optional
         The CO SLED calibration values (see conversionCOSLED). The default is 1 and 2.5.
     SLEDType : str, optional
@@ -590,14 +591,14 @@ def runFMC(cosmo,
         VariableList,Failure=fetchVariablesCOSMOS(Data,StartingRedshift,EndingRedshift,OriginalMapParams,PixelScalingFactor,SliceNumber,RestFrequency,NameParams,MapSpreadParameter=MapSpreadParameter,FreqSpreadParameter=FreqSpreadParameter)
 
         
-        #if we actually have some galaxies, we make an updated cube
+        #if we actually have some valid galaxies, we make an updated cube
         if not Failure:
             LumArray=calcLsun(VariableList,VariableLabel1,VariableLabel2,ModelCoefficients)
-            if COModel: #need to propagate from CO(1-0)
+            if COModel: #need to propagate from CO(1-0) calculated above
                 LumArray=conversionCOSLED(VariableList, LumArray,muCoeff1,muCoeff2,COTransition,SLEDFilename,MSFilename,SLEDType=SLEDType)
 
             FluxArray=fluxUnitConversion(cosmo,VariableList["Redshift"],LumArray,SliceNumber,BeamSizeRad,StartingRedshift,EndingRedshift,RestFrequency,FreqSpreadParameter,MapSpreadParameter)
-            FluxCube=FluxCube+createSimple3DMap(VariableList,FluxArray,SliceNumber,PixelMapLength,MapSpreadParameter=MapSpreadParameter,FreqSpreadParameter=FreqSpreadParameter)
+            FluxCube+=createSimple3DMap(VariableList,FluxArray,SliceNumber,PixelMapLength,MapSpreadParameter=MapSpreadParameter,FreqSpreadParameter=FreqSpreadParameter)
     #only after we are done with each sample file to we convolve
     FluxCube=convolveKernel3DMap(FluxCube,SliceNumber,PixelMapLength,MapSpreadParameter=MapSpreadParameter,FreqSpreadParameter=FreqSpreadParameter,ConvMap=ConvMap,ConvZ=ConvZ)
     #if the cube was made (which we check for), we save the cube with metadata
@@ -609,7 +610,6 @@ def runFMC(cosmo,
         print("Map Making Complete")
     else:
         print("Failure to make cube, returning nothing")
-    print("")
 
 
 
