@@ -1,19 +1,10 @@
 """
-These messy sets of functions are the ones that make the samples used in extrapolation
+These sets of functions are the ones that make the samples used in extrapolation
 There is a hierarchy here - we must always have a FARMER LP sample cut up appropriately (e.g. FARMER LP, exept just 0.5<z<1)
 We then make corresponding mask sample first. Then, we do the voronoi weighting to make the corresponding voronoi weighting map for future interp
 Then, we do the CANDELS interp (if wanted)
-Then, we fit a schechter curve to the combined sample of the above (have to find on your own, will make a function later for that)
+Then, we fit a schechter curve to the combined sample of the above. This function is NOT included here
 Once we have that schechter function, we use all of the previous samples and hand them in for the final additional sample
-For each of these, we have "previous extrapolated..." stuff. This is a relic from where each interpolated part overlapped. Don't need now, but will keep as "legacy"
-We also have main sequence stuff generated here as well
-And condensing sample!
-
-
-THIS IS AN UPDATED VERSION FOR THE CHANGES WE MDE in 2025, MAKING THE EXTRAPOLATED SAMPLES FAR MORE ACCURATELY
-E.g. following mass functions from COSMOS 2025.
-
-
 
 """
 ###import the relevant functions
@@ -22,8 +13,6 @@ import numpy as np
 from astropy.table import Table
 from tqdm import tqdm
 
-
-#the schechter curve we use. Log form, consistent with previous files
 def LogSchechterCurve(logL,logphi0,a,logLc):
     """
     Returns a Schechter curve, in log format, used for fitting, or for finding the "expected" numbers of galaxies
@@ -48,7 +37,7 @@ def LogSchechterCurve(logL,logphi0,a,logLc):
     return logphi0-a*(logL-logLc)-(np.power(10,logL)/np.power(10,logLc))*np.log10(2.71)
 
 
-def flipArray(Data,BaselineArr):
+def flipArray(Data):
     """
     Flips a 2D array and saves it as a Table, to save in a fits file. Is required due to how we filter and condense the fits files from the originals, to ensure columns are correct way around 
 
@@ -68,10 +57,9 @@ def flipArray(Data,BaselineArr):
     return Table(flippedArray)
 
 
-#
 def findXYZ(SelectionMap,OneDProbDistr,OriginalMapParams,StartingRedshift,EndingRedshift):
     """
-     the way to find coordinates from a voronoi weigthting map - basically, the uppermost digit gives the slice, the modulo gives x and y. 
+     the way to find coordinates from a voronoi weighting map - basically, the uppermost digit gives the slice, the modulo gives x and y. 
      We return coords in the format of "COSMOS units", i.e. 0.15 arcsec, with the mask, so these coordinates match the original  
 
     Parameters
@@ -95,16 +83,16 @@ def findXYZ(SelectionMap,OneDProbDistr,OriginalMapParams,StartingRedshift,Ending
     """
     SliceNumber=len(SelectionMap)
     PixelNumber=len(SelectionMap[0])
+    #these selection maps store own coordinates in their pixels. We draw them out, and derive the x and y coordinates from there
     zxy=np.random.choice(SelectionMap,1,p=OneDProbDistr)
-    z=StartingRedshift+(EndingRedshift-StartingRedshift)*(zxy//(PixelNumber**2)+np.random.rand())/SliceNumber
+    z=StartingRedshift+(EndingRedshift-StartingRedshift)*(zxy//(PixelNumber**2)+np.random.rand())/SliceNumber #we must derive the actual redshift for this
     xy=zxy%(PixelNumber**2)
+    #x and y are in arbitrary pixel units
     x,y=(int(xy/PixelNumber)+np.random.rand())*(OriginalMapParams[1]/PixelNumber)+OriginalMapParams[3],((xy%PixelNumber)[0]+np.random.rand())*(OriginalMapParams[2]/PixelNumber)+OriginalMapParams[5]
     return x,y,z
 
 
-#TODO
-
-def extrapolateSampleViaMask(MainFilename,TemplateMaskFilename,ExtrapolatedMaskFilename,StartingRedshift,EndingRedshift,OriginalMapParams,PixelScalingFactor,
+def extrapolateSampleViaMask(Filename_Base,TemplateFilename_Mask,ExtrapolatedFilename_Mask,StartingRedshift,EndingRedshift,OriginalMapParams,PixelScalingFactor,
                              NameParams={"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}):
     """
     This is basically just the mask we get from the basic sample. We use pixel params to decide where the galaxies are
@@ -113,12 +101,12 @@ def extrapolateSampleViaMask(MainFilename,TemplateMaskFilename,ExtrapolatedMaskF
 
     Parameters
     ----------
-    MainFilename : TYPE
-        DESCRIPTION.
-    TemplateMaskFilename : TYPE
-        DESCRIPTION.
-    ExtrapolatedMaskFilename : TYPE
-        DESCRIPTION.
+    Filename_Base : string
+        Name of the base COSMOS2020 sample for the z~0.5 interval
+    TemplateFilename_Mask : string
+        Name of the file that determines the locations of the tomography that are masked out within COSMOS2020. This is determined separately, and is not included in this code sample.
+    ExtrapolatedFilename_Mask : string
+        Name of the file that we will save the "stellar mask" sample to
     Starting/EndingRedshift : floats
         The redshift range we are making galaxies for
     OriginalMapParams : List
@@ -126,8 +114,8 @@ def extrapolateSampleViaMask(MainFilename,TemplateMaskFilename,ExtrapolatedMaskF
         dimensions, in those same units, for x and y. The fourth and fifth are the lower and upper limits, in the same pixel units, for x (sixth and seventh are for y) 
     PixelScalingFactor: float
         The size of the beam in the aforementioned arbitrary pixel units (e.g. 37.2 arcsec -> 248). This is used to convert the galaxy locations from the pixel units into the pixels we use for our maps
-    NameParams : TYPE, optional
-        DESCRIPTION. The default is {"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}.
+    NamesParams: dict, optional
+        dictionary used to find the names of the columns we take galaxy data from. The default is {"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}.
 
     Returns
     -------
@@ -135,106 +123,80 @@ def extrapolateSampleViaMask(MainFilename,TemplateMaskFilename,ExtrapolatedMaskF
 
     """
     
+    nameRedshift,nameX,nameY=NameParams["Redshift"],NameParams["x_orig"],NameParams["y_orig"]
 
 
     #we take the original sample, and also the mask. We find each pixel with no signal
-    Data=CE.loadSample(MainFilename)
-    MaskMap=np.load(TemplateMaskFilename,allow_pickle=True)
+    Data=CE.loadSample(Filename_Base)
+    MaskMap=np.load(TemplateFilename_Mask,allow_pickle=True)
     MaskPixels=[]
-    for i in range(len(MaskMap)):
-        for j in range(len(MaskMap[0])):
-            if MaskMap[j][i]!=0: MaskPixels.append([i,j])
-    #using this we find the relative areas of these. Then, 
+    MaskPixels=np.where(MaskMap!=0)
+    #using this we find the relative areas of these.
     MaskArea=len(MaskPixels)*(PixelScalingFactor**2) 
     TotalMapArea=len(MaskMap)*len(MaskMap[0])*(PixelScalingFactor**2) 
     MasklessMapArea=TotalMapArea-MaskArea
+    MapDensity=len(Data)/MasklessMapArea #how many galaxies per arbitrary pixel²
+    
+    
+    #Will need to use this data for extrapolation
+
+    
+    
+    
+    
+    #we then want to add galaxies into the mask region until these are the same. We do not know how many we need to add
     MaskDensity=0
-    MapDensity=len(Data)/MasklessMapArea
-    NewMaskData=[]
-    
-    
-    Masses=[]
-    SFRs=[]
-    LIRs=[]
-    OIIIs=[]
-    for i in range(len(Data)):
-        
-        if not np.isnan(float(Data[i][indexMass])) and not np.isnan(float(Data[i][indexSFR]))  and not np.isnan(float(Data[i][indexLIR]))  and not np.isnan(float(Data[i][indexOIII]))  and OriginalMapParams[3]<Data[i][3] and OriginalMapParams[4]>Data[i][3] and OriginalMapParams[5]<Data[i][4] and OriginalMapParams[6]>Data[i][4]:
-            
-            Masses.append(float(Data[i][indexMass]))
-            SFRs.append(float(Data[i][indexSFR]))
-            LIRs.append(float(Data[i][indexLIR]))
-            OIIIs.append(float(Data[i][indexOIII]))
-    
-    #don't want to draw on the very highest galaxies! if use highest
-    LimIndex=-5 #don't use the very highest 5
-    if len(Masses)<20: #if very few
-        LimIndex=-1
-    
-    MaxMass=sorted(Masses)[LimIndex]
-    MaxSFR=sorted(SFRs)[LimIndex]
-    MaxLIR=sorted(LIRs)[LimIndex]
-    MaxOIII=sorted(OIIIs)[LimIndex]
-    
-    print(MaxMass,MaxSFR,MaxLIR,MaxOIII)
-    
-    #whilst the mask density hasn't matched the map density. We add galaxies in a random, proportional way, that should line up with the previous sample
-    Failurecount=0
+    NewMaskData=[] 
+
     while MaskDensity<MapDensity:
+        #choose a random galaxy, determine a random location in the mask
         RandomSelectionInteger=np.random.randint(0,len(MaskPixels)-1)
         x,y=(MaskPixels[RandomSelectionInteger][0]+np.random.rand())*PixelScalingFactor+OriginalMapParams[3],(MaskPixels[RandomSelectionInteger][1]+np.random.rand())*PixelScalingFactor+OriginalMapParams[5]
         
-        Invalid=True
-        while Invalid:
-            RandomGalaxyInteger=np.random.randint(0,len(Data)-1)
-            #print(Data[RandomGalaxyInteger][indexMass],MaxMass,Data[RandomGalaxyInteger][indexSFR],MaxSFR,Data[RandomGalaxyInteger][indexLIR],MaxLIR,Data[RandomGalaxyInteger][indexLIR],MaxOIII)
-            if Data[RandomGalaxyInteger][indexMass]<MaxMass and Data[RandomGalaxyInteger][indexSFR]<MaxSFR and Data[RandomGalaxyInteger][indexLIR]<MaxLIR  and Data[RandomGalaxyInteger][indexOIII]<MaxOIII and OriginalMapParams[3]<Data[RandomGalaxyInteger][3] and OriginalMapParams[4]>Data[RandomGalaxyInteger][3] and OriginalMapParams[5]<Data[RandomGalaxyInteger][4] and OriginalMapParams[6]>Data[RandomGalaxyInteger][4]: 
-                Invalid=False
-            else:
-                Failurecount=Failurecount+1
-            #     print("a")
-            # print("b")
-        NewMaskData.append(Data[RandomGalaxyInteger]) 
-        NewMaskData[-1][indexXpix],NewMaskData[-1][indexYpix]=x,y 
-        NewMaskData[-1][indexRedshift]=StartingRedshift+np.random.rand()*(EndingRedshift-StartingRedshift) #to randomise the redshift
-        MaskDensity=MaskDensity+(1/MaskArea)
-    print("Num successes: "+str(len(NewMaskData)))
-    print("Failure count: "+str(Failurecount))
+        #choose a random galaxy from the original sample
+        RandomGalaxyInteger=np.random.randint(0,len(Data)-1)
 
+        #then save
+        NewMaskData.append(Data[RandomGalaxyInteger]) 
+        NewMaskData[-1][nameX],NewMaskData[-1][nameY]=x,y 
+        NewMaskData[-1][nameRedshift]=StartingRedshift+np.random.rand()*(EndingRedshift-StartingRedshift) #to randomise the redshift
+        MaskDensity=MaskDensity+(1/MaskArea) #increment
+    print("Num extra galaxies: "+str(len(NewMaskData)))
     #then the save this new data. Turns it into a table
-    t = flipArray(NewMaskData,Data[0]) 
-    t.write(ExtrapolatedMaskFilename, format='fits',overwrite=True) #saves it as a new file
+    t = flipArray(NewMaskData) 
+    t.write(ExtrapolatedFilename_Mask, format='fits',overwrite=True) #saves it as a new file
+    #We add column names later (not included here)
     print("")
 
 
-##########################
-#TODO
-#When I have a given sample (sample+mask) and we want to make a voronoi map from it, we need to use this
-#In this case we can weight by log_mass or log_LIR, user choice
-#The voronoi map we used is ALWAYS normalised to 10 slices, 100x100 pixels. Have hardcoded
-def calcVoronoiMap(MainFilename,MaskFilename,VoronoiFilename,StartingRedshift,EndingRedshift,OriginalMapParams,WeightOrders,
+def calcVoronoiMap(Filename_Base,Filename_Mask,Filename_Voronoi,StartingRedshift,EndingRedshift,OriginalMapParams,WeightOrders,
                    NameParams={"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"},
                    WeightingMethod="Mass"):
     """
-    
+    When I have a given sample (sample+mask) and we want to make a voronoi map from it, we need to use this
+    In this case we can weight by log_mass or log_LIR, user choice
+    The voronoi map we used is ALWAYS normalised to 10 slices, 100x100 pixels. Have hardcoded
 
     Parameters
     ----------
-    MainFilename : TYPE
-        DESCRIPTION.
-    MaskFilename : TYPE
-        DESCRIPTION.
-    VoronoiFilename : TYPE
-        DESCRIPTION.
+    Filename_Base : string
+        Name of the base COSMOS2020 sample for the z~0.5 interval
+    Filename_Mask : string
+        Name of the stellar mask COSMOS2020 sample for the z~0.5 interval, determined above
+    Filename_Voronoi : string
+        Name of the file we save the voronoi tesselation from this
     Starting/EndingRedshift : floats
         The redshift range we are making galaxies for
     OriginalMapParams : List
         a list of 7 values describing COSMOS. The first is the size of the cube in its arbitrary pixel units (of 0.15 arcsec). The second and third are the desired cube 
         dimensions, in those same units, for x and y. The fourth and fifth are the lower and upper limits, in the same pixel units, for x (sixth and seventh are for y) 
-    WeightOrders : TYPE
-        DESCRIPTION.
-    NameParams : TYPE, optional
-        DESCRIPTION. The default is "".
+    WeightOrders : list
+        Four integers which determine how we weight each galaxy. The first is the baseline weighting, the second-fourth are the weights we give to the central and surrounding voxels
+        in the voronoi weighting map
+    NamesParams: dict, optional
+        dictionary used to find the names of the columns we take galaxy data from. The default is {"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}.
+    WeightingMethod : string, optional
+        Whether we weight the galaxies by stellar mass, LIR, or give no weight to galaxies. This provides structure to later extrapolation. The default is "".
     
 
     Returns
@@ -243,10 +205,11 @@ def calcVoronoiMap(MainFilename,MaskFilename,VoronoiFilename,StartingRedshift,En
 
     """
     
+    nameLIR,nameLogMass,nameLogSFR,nameRedshift,nameOIII,nameX,nameY,nameFlag,nameRedshifterr=NameParams["LIR"],NameParams["log_mass"],NameParams["log_SFR"],NameParams["Redshift"],NameParams["OIII"],NameParams["x_orig"],NameParams["y_orig"],NameParams["FLAG"],NameParams["Redshift_err"] 
     
     
-    Data=CE.loadSample(MainFilename)
-    MaskData=CE.loadSample(MaskFilename)
+    Data=CE.loadSample(Filename_Base)
+    MaskData=CE.loadSample(Filename_Mask)
     log_mass,log_LIR,zpix,xpix,ypix=[],[],[],[],[]
     #hardcoded the limits for now
     VoronoiSliceNumber,VoronoiPixelNumber=10,100
@@ -269,6 +232,7 @@ def calcVoronoiMap(MainFilename,MaskFilename,VoronoiFilename,StartingRedshift,En
             zpix.append(Numslices*(EndingRedshift-MaskData[j][indexRedshift])//(EndingRedshift-StartingRedshift))
     if WeightingMethod=="Number": IndivWeight=np.ones(len(log_mass)) #normalised weights, which we multiply by weightorders
     elif WeightingMethod=="Mass": IndivWeight=log_mass/np.max(log_mass)
+    elif WeightingMethod=="LIR": IndivWeight=log_LIR/np.max(log_LIR)
     WeightingMap=np.zeros((Numslices,VoronoiPixelNumber,VoronoiPixelNumber))+WeightOrders[0] #i.e. we have a base weighting
     centre,outer,v_outer=WeightOrders[1],WeightOrders[2],WeightOrders[3]
     #for each galaxy that we use, we assign a given weighting, spread around multiple pickles
@@ -291,39 +255,39 @@ def calcVoronoiMap(MainFilename,MaskFilename,VoronoiFilename,StartingRedshift,En
             if x+1<VoronoiPixelNumber and y-1>=0:WeightingMap[z][y-1][x+1]=WeightingMap[z][y-1][x+1]+v_outer*IndivWeight[i]
             if x-1>=0 and y+1<VoronoiPixelNumber:WeightingMap[z][y+1][x-1]=WeightingMap[z][y+1][x-1]+v_outer*IndivWeight[i]
             if x-1>=0 and y-1>=0:WeightingMap[z][y-1][x-1]=WeightingMap[z][y-1][x-1]+v_outer*IndivWeight[i]
-    np.save(VoronoiFilename,np.asarray(WeightingMap),allow_pickle=True)
+    np.save(Filename_Voronoi,np.asarray(WeightingMap),allow_pickle=True)
 
 
 ###############################
 #TODO
-#Once we have the original file, the mask data, and the voronoi data, we start with the candels stuff
-def extrapolateSampleViaCANDELs(MainFilename,MaskFilename,VoronoiFilename,CANDELsFilename,CANDELsFactor,StartingRedshift,EndingRedshift,OriginalMapParams,
-                                MinMassLim="",
+
+def extrapolateSampleViaCANDELs(Filename_Base,Filename_Mask,Filename_Voronoi,Filename_CANDELS,CANDELSFactor,StartingRedshift,EndingRedshift,OriginalMapParams,
+                                MinMassLim=0,
                                 NameParams={"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}):
     """
     
-
+    Once we have the original file, the mask data, and the voronoi data, we start with the candels stuff
     Parameters
     ----------
-    MainFilename : TYPE
-        DESCRIPTION.
-    MaskFilename : TYPE
-        DESCRIPTION.
-    VoronoiFilename : TYPE
-        DESCRIPTION.
-    CANDELsFilename : TYPE
-        DESCRIPTION.
-    CANDELsFactor : TYPE
-        DESCRIPTION.
+    Filename_Base : string
+        Name of the base COSMOS2020 sample for the z~0.5 interval
+    Filename_Mask : string
+        Name of the stellar mask COSMOS2020 sample for the z~0.5 interval
+    Filename_Voronoi : string
+        Name of the file we load the voronoi tesselation from
+    Filename_CANDELS : string
+        Name of the file we save the CANDELS extrapolation to
+    CANDELSFactor : float
+        The ratio of CANDELS to COSMOS2020 galaxies used in this extrapolation, determined in the previous file
     Starting/EndingRedshift : floats
         The redshift range we are making galaxies for
     OriginalMapParams : List
         a list of 7 values describing COSMOS. The first is the size of the cube in its arbitrary pixel units (of 0.15 arcsec). The second and third are the desired cube 
         dimensions, in those same units, for x and y. The fourth and fifth are the lower and upper limits, in the same pixel units, for x (sixth and seventh are for y) 
-    MinMassLim : TYPE, optional
-        DESCRIPTION. The default is "".
-    NameParams : TYPE, optional
-        DESCRIPTION. The default is {"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}.
+    MinMassLim : float, optional
+        The minimum mass we extrapolate down to, following the mass completeness equations of Weaver+22,23 determined earlier. The default is "".
+    NamesParams: dict, optional
+        dictionary used to find the names of the columns we take galaxy data from. The default is {"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}.
 
     Returns
     -------
@@ -333,8 +297,8 @@ def extrapolateSampleViaCANDELs(MainFilename,MaskFilename,VoronoiFilename,CANDEL
 
 
     #get all the data we need
-    OriginalData=CE.loadSample(MainFilename)
-    MaskData=CE.loadSample(MaskFilename)
+    OriginalData=CE.loadSample(Filename_Base)
+    MaskData=CE.loadSample(Filename_Mask)
     #Data=np.append(DataOrig,DataMask)
     Data=[]
     for i in range(len(OriginalData)):
@@ -344,7 +308,7 @@ def extrapolateSampleViaCANDELs(MainFilename,MaskFilename,VoronoiFilename,CANDEL
     
     PerCounter=0
     #Now the voronoi parameters. Hard code these maps for now. We have our mask selection
-    VoronoiMap=np.load(VoronoiFilename,allow_pickle=True)
+    VoronoiMap=np.load(Filename_Voronoi,allow_pickle=True)
     OneDProbDistr=VoronoiMap.flatten()/np.sum(VoronoiMap)
     SelectionMap=np.arange(0,VoronoiSliceNumber*(VoronoiPixelNumber**2),1)
     
@@ -385,7 +349,7 @@ def extrapolateSampleViaCANDELs(MainFilename,MaskFilename,VoronoiFilename,CANDEL
     #for x,y,z, randomise within slice
     PerCounter=0
     
-    if CANDELsFactor==1:
+    if CANDELSFactor==1:
         NewData.append(Data[0])
         x,y,z=findXYZ(SelectionMap,OneDProbDistr,OriginalMapParams,StartingRedshift,EndingRedshift)
 
@@ -394,7 +358,7 @@ def extrapolateSampleViaCANDELs(MainFilename,MaskFilename,VoronoiFilename,CANDEL
         if Data[j][indexMass]>MinMassLim:
             #also have this limit
             if Data[j][indexMass]<MaxMass and Data[j][indexSFR]<MaxSFR and Data[j][indexLIR]<MaxLIR and Data[j][indexOIII]<MaxOIII  and OriginalMapParams[3]<Data[j][3] and OriginalMapParams[4]>Data[j][3] and OriginalMapParams[5]<Data[j][4] and OriginalMapParams[6]>Data[j][4]:
-                PerCounter=PerCounter+(1-CANDELsFactor)/CANDELsFactor
+                PerCounter=PerCounter+(1-CANDELsFactor)/CANDELSFactor
                 while PerCounter>1:
                     NewData.append(Data[j])
                     
@@ -410,7 +374,7 @@ def extrapolateSampleViaCANDELs(MainFilename,MaskFilename,VoronoiFilename,CANDEL
     print("Failure count: "+str(Failurecount))
     #once we have all this data, we flip it and save!
     t = flipArray(NewData,Data[0]) 
-    t.write(CANDELsFilename, format='fits',overwrite=True) 
+    t.write(Filename_CANDELS, format='fits',overwrite=True) 
     print("")
     
 
@@ -418,40 +382,42 @@ def extrapolateSampleViaCANDELs(MainFilename,MaskFilename,VoronoiFilename,CANDEL
 #TODO
 
 
-def extrapolateSampleViaMassF(MainFilename,MaskFilename,VoronoiFilename,CANDELSFilename,MassFFilename,StartingRedshift,EndingRedshift,OriginalMapParams,SchechterParams,Volume,Dex,MinMass,GalaxyMSParams,
+def extrapolateSampleViaMassF(Filename_Base,Filename_Mask,Filename_Voronoi,Filename_CANDELS,Filename_Mass,StartingRedshift,EndingRedshift,OriginalMapParams,SchechterParams,Volume,Dex,MinMass,MainSequenceParams,
                               NameParams={"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}):
     """
     
 
     Parameters
     ----------
-    MainFilename : TYPE
-        DESCRIPTION.
-    MaskFilename : TYPE
-        DESCRIPTION.
-    VoronoiFilename : TYPE
-        DESCRIPTION.
-    CANDELSFilename : TYPE
-        DESCRIPTION.
-    MassFFilename : TYPE
-        DESCRIPTION.
+    
+    Filename_Base : string
+        Name of the base COSMOS2020 sample for the z~0.5 interval
+    Filename_Mask : string
+        Name of the stellar mask COSMOS2020 sample for the z~0.5 interval
+    Filename_Voronoi : string
+        Name of the file we load the voronoi tesselation from
+    Filename_CANDELS : string
+        Name of the CANDELS COSMOS2020 sample for the z~0.5 interval
+    Filename_Mass : string
+        Name of the file we save the mass function extrapolation to
+ 
     Starting/EndingRedshift : floats
         The redshift range we are making galaxies for
     OriginalMapParams : List
         a list of 7 values describing COSMOS. The first is the size of the cube in its arbitrary pixel units (of 0.15 arcsec). The second and third are the desired cube 
         dimensions, in those same units, for x and y. The fourth and fifth are the lower and upper limits, in the same pixel units, for x (sixth and seventh are for y) 
-    SchechterParams : TYPE
-        DESCRIPTION.
-    Volume : TYPE
-        DESCRIPTION.
-    Dex : TYPE
-        DESCRIPTION.
-    MinMass : TYPE
-        DESCRIPTION.
-    GalaxyMSParams : TYPE
-        DESCRIPTION.
-    NameParams : TYPE, optional
-        DESCRIPTION. The default is {"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}.
+    SchechterParams : list
+        List of floats that represent the fitting to existing data, determined earlier (not included here - used scipy.curve_fit to existing data)
+    Volume : float
+        Volume of area covered by redshift range, map on-sky, in Mpc. Use to determine numbers to extrapolate
+    Dex : float
+        Dex interval used in the schechter function/extrapolation
+    MinMass : float
+        The minimum mass we extrapolate down to (typically use logmass=8, below that point we do not expect much extrapolaton)
+    MainSequenceParams : list
+        The two values determining the mass function for the given redshift range
+    NameParams : dict, optional
+        dictionary used to find the names of the columns we take galaxy data from. The default is {"LIR":"LIR","log_mass":"logMass","log_SFR":"logSFR","Redshift":"z","OIII":"OIII","x_orig":"X","y_orig":"Y","FLAG":"FLAG","Redshift_err":"z68LL"}.
 
     Returns
     -------
@@ -459,9 +425,9 @@ def extrapolateSampleViaMassF(MainFilename,MaskFilename,VoronoiFilename,CANDELSF
 
     """
     #import data, make into a big list
-    OriginalData=CE.loadSample(MainFilename)
-    MaskData=CE.loadSample(MaskFilename)
-    CANDELSData=CE.loadSample(CANDELSFilename)
+    OriginalData=CE.loadSample(Filename_Base)
+    MaskData=CE.loadSample(Filename_Mask)
+    CANDELSData=CE.loadSample(Filename_CANDELS)
     #Data=np.append(OriginalData,[MaskData,CANDELSData])
     Data=[]
     for i in range(len(OriginalData)):
@@ -497,7 +463,7 @@ def extrapolateSampleViaMassF(MainFilename,MaskFilename,VoronoiFilename,CANDELSF
     print(ModelNumbers)
     #set up voronoi parameters for comparison
     VoronoiSliceNumber,VoronoiPixelNumber=10,100
-    VoronoiMap=np.load(VoronoiFilename,allow_pickle=True)
+    VoronoiMap=np.load(Filename_Voronoi,allow_pickle=True)
     OneDProbDistr=VoronoiMap.flatten()/np.sum(VoronoiMap)
     SelectionMap=np.arange(0,VoronoiSliceNumber*(VoronoiPixelNumber**2),1)
     
@@ -563,6 +529,5 @@ def extrapolateSampleViaMassF(MainFilename,MaskFilename,VoronoiFilename,CANDELSF
     
     #flip array and save!
     t = flipArray(NewData,Data[0]) 
-    t.write(MassFFilename, format='fits',overwrite=True) 
+    t.write(Filename_Mass, format='fits',overwrite=True) 
     
-
