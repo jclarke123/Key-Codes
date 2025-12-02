@@ -68,12 +68,14 @@ def calcCANDELSDensity(Data_mass,Data_multiband,z_lower, mass_cutoff,map_area=(2
 
     """
     z_higher=z_lower+0.5 #0.5 redshift intervals
-    num_galaxies=0 #number of galaxies in the range
-    for i, Galaxy in enumerate(Data_mass):
-        #these conditions you will need to manually set depending on the situation
-        #in this case, we make sure galaxies
-        if z_lower<Galaxy[z_index] and Galaxy[z_index]<z_higher and Galaxy[mass_index]>mass_cutoff and 23.9-2.5*np.log10(np.absolute(Data_multiband[i][IRlum_index]))<26:
-            num_galaxies+=1
+    
+    
+    
+    #these conditions you will need to manually set depending on the situation
+    #in this case, we make sure galaxies are above the mass completeness cutoff, as well as within redshift range, and within reliable magnitude limits for COSMOS2020 as well
+    ValidGalaxies=(Data_mass[:,z_index]>z_lower)*(Data_mass[:,z_index]<z_higher)*(Data_mass[:,mass_index]>mass_cutoff)*(23.9-2.5*np.log10(np.absolute(Data_multiband[:,IRlum_index]))<26)
+    num_galaxies=np.sum(ValidGalaxies) #number of galaxies in the range
+    
     CANDELS_density=num_galaxies/map_area #number of galaxies per deg² for CANDELS in the range
     return CANDELS_density
 
@@ -82,18 +84,12 @@ def calcCANDELSDensity(Data_mass,Data_multiband,z_lower, mass_cutoff,map_area=(2
 
 
 
-def calcCOSMOSDensity(Data_mass,Data_multiband,z_lower, mass_cutoff,map_area=1.2*1.2,mass_index=8,X_index=3,Y_index=4,OriginalMapParams=[45000,29000,29000,7000,36000,7600,36600],file_folder=""):
+def calcCOSMOSDensity(z_lower, mass_cutoff,map_area=1.2*1.2,mass_index=8,X_index=3,Y_index=4,OriginalMapParams=[45000,29000,29000,7000,36000,7600,36600],file_folder=""):
     """
-    
+    Repeating the above but for COSMOS2020    
 
     Parameters
-    ----------
-    Data_mass : numpy array
-        the 2D array containing data from the mass file of CANDELS
-    
-    Data_multiband : numpy array
-        the 2D array containing data from the photoz file of CANDELS
-        
+    ---------- 
     z_lower : float
         the lower bound of redshift we are interested in (the upper bound is fixed at 0.5 higher)
     
@@ -120,44 +116,33 @@ def calcCOSMOSDensity(Data_mass,Data_multiband,z_lower, mass_cutoff,map_area=1.2
 
     """
     
-    z_higher=z_lower+0.5
+    z_higher=z_lower+0.5 #similar to the above
     num_galaxies=0 
-    File_base=file_folder+("SampleCONDENSED_COSMOS2020_z~Z1-Z2_BASE.fits").replace("Z1-Z2",str(z_lower).replace(".",",")+"-"+str(z_higher).replace(".",","))
-    File_mask=file_folder+("SampleCONDENSED_COSMOS2020_z~Z1-Z2_STELLARMASK.fits").replace("Z1-Z2",str(z_lower).replace(".",",")+"-"+str(z_higher).replace(".",","))
+    File_base=file_folder+("SampleCONDENSED_COSMOS2020_z~Z1-Z2_BASE.fits").replace("Z1-Z2",str(z_lower).replace(".",",")+"-"+str(z_higher).replace(".",",")) #filename we use to load
     Data_base=loadSample(File_base)
-    Data_mask=loadSample(File_mask)
-    for Galaxy in Data_base:
-        if Galaxy[X_index]>=OriginalMapParams[3] and Galaxy[X_index]<=OriginalMapParams[4] and Galaxy[Y_index]>=OriginalMapParams[5] and Galaxy[Y_index]<=OriginalMapParams[6]:
-            if Galaxy[mass_index]>mass_cutoff:
-                num_galaxies+=1
-    for Galaxy in Data_mask:
-        if Galaxy[X_index]>=OriginalMapParams[3] and Galaxy[X_index]<=OriginalMapParams[4] and Galaxy[Y_index]>=OriginalMapParams[5] and Galaxy[Y_index]<=OriginalMapParams[6]:
-            if Galaxy[mass_index]>mass_cutoff:
-                num_galaxies+=1
-    COSMOS_density=num_galaxies/map_area #number of galaxies per deg² for CANDELS in the range
+    #finding all galaxies within the map range, and the mass cutoff
+    ValidGalaxies=(Data_base[:,X_index]>=OriginalMapParams[3])*(Data_base[:,X_index]<=OriginalMapParams[4])*(Data_base[:,Y_index]>=OriginalMapParams[5])*(Data_base[:,Y_index]<=OriginalMapParams[6])*(Data_base[:,mass_index]>mass_cutoff)
+    num_galaxies=np.sum(ValidGalaxies)
+    COSMOS_density=num_galaxies/map_area #number of galaxies per deg² for COSMOS2020 in the range
     return COSMOS_density
-
-
-
-
 
 
 
 def createCANDELSRatios(file_save):
     """
-    Running the above functions
+    Finding the ratio of the CANDELS and COSMOS2020 for all redshifts in z~0.5 range, finding the "CANDELS" ratios
 
     Parameters
     ----------
     file_save : string
-        the file location where we store the file that contains the "CANDELS Ratios" for each z~0.5 interval for use in extrapolation
+        the file location where we store the file
 
     Returns
     -------
     None.
 
     """
-    #sample files we use for CANDELS, which include physical parameters, various stellar mass calculations, multiband wavelength data, and redshift data. We need these to calibrateour extrapolation
+    #sample files we use for CANDELS, which include physical parameters, various stellar mass calculations, multiband wavelength data, and redshift data. We need these to calibrate our extrapolation
     Samplename_mass="hlsp_candels_hst_wfc3_cos_multi_v1_mass-cat.fits"
     Samplename_multiband="lsp_candels_hst_wfc3_cos-tot-multiband_f160w_v1_cat.fits"
     Data_mass=loadSample(Samplename_mass)
@@ -169,19 +154,22 @@ def createCANDELSRatios(file_save):
     z_bands_lower=np.arange(0,8.5,0.5) #redshift
     z_bands_upper=z_bands_lower+0.5
     z_bands_midpoints=(z_bands_upper+z_bands_lower)/2
-    #the mass completeness equation taken from Weaver+2022
-    mass_cutoffs=0-3.23e7*(1 + z_bands_midpoints) + 7.83e7*(1 + z_bands_midpoints)**2 #Msol
+    
+    #the mass limits are from the mass completeness equation, taken from Weaver+2022 (COSMOS2020 paper)
+    mass_cutoffs=0-3.23e7*(1 + z_bands_midpoints) + 7.83e7*(1 + z_bands_midpoints)**2 #in Msol units
     
     
     CANDELS_factors=np.zeros(len(z_bands_lower))
     #we run the procedure. We always take a maximum ratio of "1"
-    for i,z in enumerate(z_bands_lower):
+    for i in range(len(z_bands_lower)):
+        z=z_bands_lower[i]
         cutoff=mass_cutoffs[i]
         CANDELS_factors[i]=np.min([1,calcCANDELSDensity(Data_mass,Data_multiband,z, cutoff)/calcCOSMOSDensity(Data_mass, Data_multiband, z, cutoff)])
-    #we then save
+    #we then save in a savez file
     np.savez(file_save,z_bands_lower=z_bands_lower,z_bands_higher=z_bands_upper,CANDELS_factors=np.asarray(CANDELS_factors))
     
 
+    
     
     
 
